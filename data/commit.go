@@ -1,17 +1,17 @@
 package data
 
 type Commit struct {
-	cmds       []cmd.Command
-	seq        int
-	deps       []InstanceId
-	replicaId  int
-	instanceId InstanceId
+	Cmds       []Command
+	Seq        int
+	Deps       []uint64
+	ReplicaId  int
+	InstanceId uint64
 }
 
 func (c *Commit) Type() uint8 {
 	return commitType
 }
 
-func (c *Commit) Content() *Commit {
+func (c *Commit) Content() interface{} {
 	return c
 }

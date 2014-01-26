@@ -16,6 +16,8 @@ const conflictNotFound = 0
 // actions
 const (
 	noAction int8 = iota + 1
+	reply
+	broadcast
 )
 
 // ****************************
