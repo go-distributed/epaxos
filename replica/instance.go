@@ -12,7 +12,7 @@ var _ = fmt.Printf
 // *****  CONST ENUM **********
 // ****************************
 
-	// instance status
+// instance status
 const (
 	nilStatus int8 = iota + 1
 	preparing
@@ -27,10 +27,10 @@ const (
 // ****************************
 
 type Instance struct {
-	cmds   []data.Command
-	seq    uint32
+	cmds []data.Command
+	seq  uint32
 	//deps   []uint64
-        deps   dependencies
+	deps   dependencies
 	status int8
 	ballot *data.Ballot
 
