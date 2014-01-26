@@ -8,6 +8,22 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestNilStatusProcessPropose(t *testing.T) {
+
+}
+
+func TestNilStatusProcessPreAccept(t *testing.T) {
+}
+
+func TestNilStatusProcessAccept(t *testing.T) {
+}
+
+func TestNilStatusProcessCommit(t *testing.T) {
+}
+
+func TestNilStatusOnCommitDependency(t *testing.T) {
+}
+
 // When a committed instance receives pre-accept message, it should ignore it
 func TestCommittedProcessPreAccept(t *testing.T) {
 	// create an new instance
@@ -25,7 +41,4 @@ func TestCommittedProcessPreAccept(t *testing.T) {
 	// - instance not changed
 	assert.Equal(t, action, noAction, "")
 	assert.Nil(t, retMsg, "")
-}
-
-func InstanceTestExamplePreAccept() {
 }

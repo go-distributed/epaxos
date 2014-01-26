@@ -68,7 +68,6 @@ type RecoveryInfo struct {
 // ****************************
 
 func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
-
 	i = &Instance{
 		replica: replica,
 		id:      instanceId,
@@ -80,7 +79,15 @@ func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
 // ****** State Processing ******
 // ******************************
 
-func (i *Instance) committedProcess(m Message) (int8, Message) {
+func (i *Instance) NilStatusProcess(m Message) (int8, Message) {
+	switch content := m.Content().(type) {
+	case *data.PreAccept:
+		return 0, content
+	default:
+		panic("")
+	}
+}
 
+func (i *Instance) committedProcess(m Message) (int8, Message) {
 	return noAction, nil
 }
