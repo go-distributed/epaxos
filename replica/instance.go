@@ -105,8 +105,12 @@ func (i *Instance) committedProcess(m Message) (int8, Message) {
 // PreAccept, PreAcceptReply, Accept, AcceptReply, PrepareReply
 func (i *Instance) acceptedProcess(m Message) (int8, Message) {
 	switch content := m.Content().(type) {
-	case *data.PreAccept, *data.PreAcceptReply, *data.PreAcceptOk, *data.Accept, *data.AcceptReply, *data.PrepareReply:
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		return noAction, nil
+	case *data.PreAccept:
+		return i.handlePreAccept(content)
+	case *data.Accept:
+		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
@@ -114,6 +118,14 @@ func (i *Instance) acceptedProcess(m Message) (int8, Message) {
 	default:
 		panic("")
 	}
+}
+
+func (i *Instance) handlePreAccept(p *data.PreAccept) (int8, Message) {
+	panic("")
+}
+
+func (i *Instance) handleAccept(a *data.Accept) (int8, Message) {
+	panic("")
 }
 
 func (i *Instance) handleCommit(c *data.Commit) (int8, Message) {

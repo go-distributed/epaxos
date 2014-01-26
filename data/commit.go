@@ -1,9 +1,9 @@
 package data
 
 type Commit struct {
-	Cmds       Commands
+	Cmds       []Command
 	Seq        int
-	Deps       Dependencies
+	Deps       []uint64
 	ReplicaId  uint8
 	InstanceId uint64
 }

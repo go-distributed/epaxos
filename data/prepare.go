@@ -13,7 +13,7 @@ type PrepareReply struct {
 	InstanceId uint64
 	Status     int8
 	Cmds       []Command
-	Deps       Dependencies
+	Deps       []uint64
 }
 
 func (p *Prepare) Type() uint8 {

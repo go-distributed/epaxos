@@ -1,12 +1,12 @@
 package data
 
 type Accept struct {
-	cmds       []Command
-	seq        int
-	deps       Dependencies
-	replicaId  int
-	instanceId uint64
-	ballot     *Ballot
+	Cmds       []Command
+	Seq        int
+	Deps       []uint64
+	ReplicaId  int
+	InstanceId uint64
+	Ballot     *Ballot
 }
 
 type AcceptReply struct {

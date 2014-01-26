@@ -3,7 +3,7 @@ package data
 type PreAccept struct {
 	Cmds       []Command
 	Seq        uint32
-	Deps       Dependencies
+	Deps       []uint64
 	ReplicaId  uint8
 	InstanceId uint64
 	Ballot     *Ballot
