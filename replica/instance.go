@@ -143,7 +143,7 @@ func (i *Instance) handleCommit(c *data.Commit) (int8, Message) {
 func (i *Instance) handlePrepare(p *data.Prepare) (int8, Message) {
 	// TODO: can delete this assertion
 	if i.isAtStatus(nilStatus) {
-		if i.ballot.Compare(data.MakeInitialBallot(i.replica.Id)) != 0 {
+		if i.ballot.Compare(data.NewBallot(0, 0, i.replica.Id)) != 0 {
 			panic("ballot should be initial ballot")
 		}
 	}

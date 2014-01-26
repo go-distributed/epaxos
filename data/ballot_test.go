@@ -11,11 +11,6 @@ func TestNewAndInitialBallot(t *testing.T) {
 	assert.Equal(t, b.epoch, uint32(2))
 	assert.Equal(t, b.number, uint64(3))
 	assert.Equal(t, b.replicaId, uint8(4))
-
-	b = MakeInitialBallot(8)
-	assert.Equal(t, b.epoch, uint32(0))
-	assert.Equal(t, b.number, uint64(0))
-	assert.Equal(t, b.replicaId, uint8(8))
 }
 
 func TestBallotToUint64(t *testing.T) {

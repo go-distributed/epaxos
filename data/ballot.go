@@ -27,10 +27,6 @@ func NewBallot(epoch uint32, number uint64, replicId uint8) *Ballot {
 	}
 }
 
-func MakeInitialBallot(replicId uint8) *Ballot {
-	return NewBallot(0, 0, replicId)
-}
-
 func (b *Ballot) ToUint64() uint64 {
 	return ((uint64(b.epoch) << (ballotNumberWidth + ballotReplicaIdWidth)) |
 		(b.number << ballotReplicaIdWidth) |

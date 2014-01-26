@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/go-epaxos/epaxos"
+	"github.com/go-epaxos/epaxos/data"
 )
 
 var _ = fmt.Printf
@@ -49,4 +50,8 @@ func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 	}
 
 	return r
+}
+
+func (r *Replica) MakeInitialBallot() *data.Ballot {
+	return data.NewBallot(r.Epoch, 0, r.Id)
 }
