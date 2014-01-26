@@ -5,29 +5,40 @@ import (
 
 	"github.com/go-epaxos/epaxos/data"
 	"github.com/go-epaxos/epaxos/test"
-        "github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/assert"
 )
+
+func TestNilStatusProcessPropose(t *testing.T) {
+
+}
+
+func TestNilStatusProcessPreAccept(t *testing.T) {
+}
+
+func TestNilStatusProcessAccept(t *testing.T) {
+}
+
+func TestNilStatusProcessCommit(t *testing.T) {
+}
+
+func TestNilStatusOnCommitDependency(t *testing.T) {
+}
 
 // When a committed instance receives pre-accept message, it should ignore it
 func TestCommittedProcessPreAccept(t *testing.T) {
 	// create an new instance
 	r := New(0, 5, new(test.DummySM))
-        i := NewInstance(r, conflictNotFound + 1)
+	i := NewInstance(r, conflictNotFound+1)
 	// set its status to committed
 	i.status = committed
 	// send a pre-accept message to it
-        msg := &data.PreAccept{
-
-        }
-        action, retMsg := i.committedProcess(msg)
+	msg := &data.PreAccept{}
+	action, retMsg := i.committedProcess(msg)
 
 	// expect:
 	// - action: NoAction
 	// - message: nil
 	// - instance not changed
-        assert.Equal(t, action, noAction, "")
-        assert.Nil(t, retMsg, "")
-}
-
-func InstanceTestExamplePreAccept() {
+	assert.Equal(t, action, noAction, "")
+	assert.Nil(t, retMsg, "")
 }

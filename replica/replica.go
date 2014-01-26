@@ -11,9 +11,7 @@ var _ = fmt.Printf
 // ****************************
 // *****  CONST ENUM **********
 // ****************************
-const (
-	conflictNotFound = 0
-)
+const conflictNotFound = 0
 
 // actions
 const (

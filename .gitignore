@@ -3,6 +3,8 @@
 *.a
 *.so
 
+*.out
+
 # Folders
 _obj
 _test

@@ -1,5 +1,6 @@
 package replica
 
 type Message interface {
-        Type() uint8
+	Type() uint8
+	Content() interface{}
 }
