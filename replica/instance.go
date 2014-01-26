@@ -87,7 +87,7 @@ func (i *Instance) isAfterStatus(status int8) bool {
 	return i.status > status
 }
 
-func (i *Instance) isEqualOrAfterStatus(status int8) bool {
+func (i *Instance) isAtOrAfterStatus(status int8) bool {
 	return i.status >= status
 }
 
@@ -117,7 +117,7 @@ func (i *Instance) acceptedProcess(m Message) (int8, Message) {
 }
 
 func (i *Instance) handleCommit(c *data.Commit) (int8, Message) {
-	if i.isEqualOrAfterStatus(committed) {
+	if i.isAtOrAfterStatus(committed) {
 		panic("")
 	}
 
@@ -157,5 +157,5 @@ func (i *Instance) handlePrepare(p *data.Prepare) (int8, Message) {
 		Ballot:     i.ballot.GetCopy(),
 	}
 
-	return reply, pr
+	return replyAction, pr
 }

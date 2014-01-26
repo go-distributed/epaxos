@@ -1,7 +1,7 @@
 package data
 
 type Commit struct {
-	Cmds       []Command
+	Cmds       Commands
 	Seq        int
 	Deps       Dependencies
 	ReplicaId  uint8
