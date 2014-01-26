@@ -3,7 +3,7 @@ package data
 type Accept struct {
 	cmds       []Command
 	seq        int
-	deps       []uint64
+	deps       Dependencies
 	replicaId  int
 	instanceId uint64
 	ballot     *Ballot
@@ -11,7 +11,7 @@ type Accept struct {
 
 type AcceptReply struct {
 	ok         bool
-	replicaId  int
+	replicaId  uint8
 	instanceId uint64
 	ballot     *Ballot
 	status     int8

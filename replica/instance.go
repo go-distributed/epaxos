@@ -27,10 +27,10 @@ const (
 // ****************************
 
 type Instance struct {
-	cmds []data.Command
+	cmds data.Commands
 	seq  uint32
 	//deps   []uint64
-	deps   dependencies
+	deps   data.Dependencies
 	status int8
 	ballot *data.Ballot
 
@@ -58,8 +58,8 @@ type RecoveryInfo struct {
 	replyCount        int
 	maxAcceptedBallot *data.Ballot
 
-	cmds         []data.Command
-	deps         dependencies
+	cmds         data.Commands
+	deps         data.Dependencies
 	status       int8
 	formerStatus int8
 }
@@ -74,26 +74,6 @@ func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
 		id:      instanceId,
 	}
 	return i
-}
-
-// ***************************************
-// ******** get copies of some fields ****
-// ***************************************
-
-func (i *Instance) getCmdsCopy() []data.Command {
-	cmds := make([]data.Command, len(i.cmds))
-	copy(cmds, i.cmds)
-	return cmds
-}
-
-func (i *Instance) getDepsCopy() dependencies {
-	deps := make(dependencies, len(i.deps))
-	copy(deps, i.deps)
-	return deps
-}
-
-func (i *Instance) getBallotCopy() *data.Ballot {
-	return i.ballot.GetCopy()
 }
 
 // ****************************
@@ -122,7 +102,7 @@ func (i *Instance) committedProcess(m Message) (int8, Message) {
 // acceptProcess will handle:
 // Commit, Preparing
 // will ignore:
-// PreAccept, Accept
+// PreAccept, PreAcceptReply, Accept, AcceptReply, PrepareReply
 func (i *Instance) acceptedProcess(m Message) (int8, Message) {
 	switch content := m.Content().(type) {
 	case *data.PreAccept, *data.PreAcceptReply, *data.PreAcceptOk, *data.Accept, *data.AcceptReply, *data.PrepareReply:
@@ -141,16 +121,24 @@ func (i *Instance) handleCommit(c *data.Commit) (int8, Message) {
 		panic("")
 	}
 
-	copy(i.cmds, c.Cmds)
-	copy(i.deps, c.Deps)
+	i.cmds = c.Cmds
+	i.deps = c.Deps
 	i.status = committed
 	// TODO: persistent
 	return noAction, nil
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (int8, Message) {
+	// TODO: can delete this assertion
+	if i.isAtStatus(nilStatus) {
+		if i.ballot.Compare(data.MakeInitialBallot(i.replica.Id)) != 0 {
+			panic("ballot should be initial ballot")
+		}
+	}
+
 	ok := false
 	if p.Ballot.Compare(i.ballot) > 0 {
+		i.ballot = p.Ballot.GetCopy()
 		ok = true
 	}
 
@@ -164,9 +152,9 @@ func (i *Instance) handlePrepare(p *data.Prepare) (int8, Message) {
 		Status:     status,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Cmds:       i.getCmdsCopy(),
-		Deps:       i.getDepsCopy(),
-		Ballot:     i.getBallotCopy(),
+		Cmds:       i.cmds.GetCopy(),
+		Deps:       i.deps.GetCopy(),
+		Ballot:     i.ballot.GetCopy(),
 	}
 
 	return reply, pr

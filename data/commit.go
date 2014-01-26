@@ -3,8 +3,8 @@ package data
 type Commit struct {
 	Cmds       []Command
 	Seq        int
-	Deps       []uint64
-	ReplicaId  int
+	Deps       Dependencies
+	ReplicaId  uint8
 	InstanceId uint64
 }
 
