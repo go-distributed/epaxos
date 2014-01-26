@@ -26,6 +26,3 @@ func TestCommittedProcessPreAccept(t *testing.T) {
 	assert.Equal(t, action, noAction, "")
 	assert.Nil(t, retMsg, "")
 }
-
-func InstanceTestExamplePreAccept() {
-}

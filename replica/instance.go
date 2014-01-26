@@ -81,6 +81,19 @@ func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
 // ******************************
 
 func (i *Instance) committedProcess(m Message) (int8, Message) {
-
 	return noAction, nil
+}
+
+// acceptProcess will handle:
+// Commit, Preparing
+// will ignore:
+// PreAccept, Accept
+func (i *Instance) acceptedProcess(m Message) (int8, Message) {
+	switch content := m.Content().(type) {
+	case data.*Commit:
+		return i.handleCommit(content)
+	case data.*Preparing:
+		return i.handlePreparing(content)
+	default:
+	}
 }
