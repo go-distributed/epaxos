@@ -37,8 +37,18 @@ func instanceTestNilStatusProcessSetup() *Instance {
 // The instance should also be ready to receive pre-accept reply. That means the
 // relevant info should be set.
 func TestNilStatusProcessPropose(t *testing.T) {
+	// test panics
+	inst := instanceTestNilStatusProcessSetup()
+	inst.status = nilStatus
+	inst.seq = 1
+	assert.Panics(t, func() { inst.nilStatusProcess(&data.Propose{}) })
+
 	i := instanceTestNilStatusProcessSetup()
+	assert.Panics(t, func() { i.nilStatusProcess(&data.Propose{}) })
+
 	i.status = nilStatus
+	assert.Panics(t, func() { i.nilStatusProcess(&data.Prepare{}) })
+
 	p := &data.Propose{
 		Cmds: commonTestlibExampleCommands(),
 	}

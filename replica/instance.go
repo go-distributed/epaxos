@@ -124,6 +124,10 @@ func (i *Instance) nilStatusProcess(m Message) (uint8, Message) {
 }
 
 func (i *Instance) committedProcess(m Message) (uint8, Message) {
+	if i.status != committed {
+		panic("")
+	}
+
 	switch content := m.Content().(type) {
 	case *data.PreAcceptReply:
 		content = content
@@ -134,6 +138,10 @@ func (i *Instance) committedProcess(m Message) (uint8, Message) {
 }
 
 func (i *Instance) acceptedProcess(m Message) (uint8, Message) {
+	if i.status != accepted {
+		panic("")
+	}
+
 	switch content := m.Content().(type) {
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		return noAction, nil
