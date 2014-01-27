@@ -1,0 +1,10 @@
+language: go
+go: 
+ - 1.2
+
+script:
+ - go get
+ - go get github.com/stretchr/testify/assert
+ - go get code.google.com/p/go.tools/cmd/cover
+ - cd replica
+ - go test -v -cover
