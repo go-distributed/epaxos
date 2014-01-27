@@ -6,6 +6,17 @@ import (
 
 type Command []byte
 
-func (cmd1 Command) Compare(cmd2 Command) int {
-	return bytes.Compare(cmd1, cmd2)
+type Commands []Command
+
+func (self Command) Compare(other Command) int {
+	return bytes.Compare(self, other)
+}
+
+func (c Commands) GetCopy() Commands {
+	cmds := make(Commands, len(c))
+	for i := range cmds {
+		cmds[i] = make(Command, len(c[i]))
+		copy(cmds[i], c[i])
+	}
+	return cmds
 }

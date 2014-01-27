@@ -3,12 +3,12 @@ package replica
 type dependencies []uint64
 
 // union unions the deps into the receiver
-func (d dependencies) union(other dependencies) bool {
+func (d dependencies) Union(other dependencies) bool {
 	if d == nil || other == nil {
-		panic("union: dependencis should not be nil")
+		panic("Union: dependencis should not be nil")
 	}
 	if len(d) != len(other) {
-		panic("union: size different!")
+		panic("Union: size different!")
 	}
 
 	same := true
@@ -21,4 +21,10 @@ func (d dependencies) union(other dependencies) bool {
 		}
 	}
 	return same
+}
+
+func (d dependencies) GetCopy() dependencies {
+	deps := make(dependencies, len(d))
+	copy(deps, d)
+	return deps
 }

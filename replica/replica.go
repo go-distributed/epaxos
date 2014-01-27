@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/go-epaxos/epaxos"
+	"github.com/go-epaxos/epaxos/data"
 )
 
 var _ = fmt.Printf
@@ -16,6 +17,8 @@ const conflictNotFound = 0
 // actions
 const (
 	noAction int8 = iota + 1
+	replyAction
+	broadcastAction
 )
 
 // ****************************
@@ -23,15 +26,15 @@ const (
 // ****************************
 
 type Replica struct {
-	Id             int
-	Size           int
+	Id             uint8
+	Size           uint8
 	MaxInstanceNum []uint64 // the highest instance number seen for each replica
 	InstanceMatrix [][]*Instance
 	StateMachine   epaxos.StateMachine
 	Epoch          uint32
 }
 
-func New(replicaId, size int, sm epaxos.StateMachine) (r *Replica) {
+func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 	r = &Replica{
 		Id:             replicaId,
 		Size:           size,
@@ -41,10 +44,14 @@ func New(replicaId, size int, sm epaxos.StateMachine) (r *Replica) {
 		Epoch:          0,
 	}
 
-	for i := 0; i < size; i++ {
+	for i := uint8(0); i < size; i++ {
 		r.InstanceMatrix[i] = make([]*Instance, 1024)
 		r.MaxInstanceNum[i] = conflictNotFound
 	}
 
 	return r
+}
+
+func (r *Replica) MakeInitialBallot() *data.Ballot {
+	return data.NewBallot(r.Epoch, 0, r.Id)
 }
