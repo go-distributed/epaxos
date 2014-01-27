@@ -15,8 +15,10 @@ func TestCommandCompareAndCopy(t *testing.T) {
 
 	other := self.GetCopy()
 
-	assert.True(t, &self != &other)
-	assert.True(t, self[0].Compare(other[0]) == 0)
-
 	assert.Equal(t, self, other)
+	assert.True(t, &self != &other)
+
+	for i := range self {
+		assert.True(t, &self[i] != &other[i])
+	}
 }

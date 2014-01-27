@@ -30,7 +30,7 @@ type Instance struct {
 	cmds data.Commands
 	seq  uint32
 	//deps   []uint64
-	deps   data.Dependencies
+	deps   dependencies
 	status int8
 	ballot *data.Ballot
 
@@ -59,7 +59,7 @@ type RecoveryInfo struct {
 	maxAcceptedBallot *data.Ballot
 
 	cmds         data.Commands
-	deps         data.Dependencies
+	deps         dependencies
 	status       int8
 	formerStatus int8
 }

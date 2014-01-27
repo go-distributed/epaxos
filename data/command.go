@@ -14,6 +14,9 @@ func (self Command) Compare(other Command) int {
 
 func (c Commands) GetCopy() Commands {
 	cmds := make(Commands, len(c))
-	copy(cmds, c)
+	for i := range cmds {
+		cmds[i] = make(Command, len(c[i]))
+		copy(cmds[i], c[i])
+	}
 	return cmds
 }
