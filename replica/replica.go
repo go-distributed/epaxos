@@ -14,6 +14,8 @@ var _ = fmt.Printf
 // ****************************
 const conflictNotFound = 0
 
+const defaultInstanceNum = 1024
+
 // actions
 const (
 	noAction uint8 = iota + 1
@@ -36,6 +38,9 @@ type Replica struct {
 }
 
 func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
+	if size%2 == 0 {
+		panic("size should be an odd number")
+	}
 	r = &Replica{
 		Id:             replicaId,
 		Size:           size,
@@ -46,7 +51,7 @@ func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 	}
 
 	for i := uint8(0); i < size; i++ {
-		r.InstanceMatrix[i] = make([]*Instance, 1024)
+		r.InstanceMatrix[i] = make([]*Instance, defaultInstanceNum)
 		r.MaxInstanceNum[i] = conflictNotFound
 	}
 

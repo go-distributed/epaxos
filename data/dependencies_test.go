@@ -7,24 +7,14 @@ import (
 )
 
 func TestUnionNilPanic(t *testing.T) {
-	defer func() {
-		r := recover()
-		assert.Equal(t, r, "Union: dependencis should not be nil")
-	}()
-
 	self := new(Dependencies)
-	self.Union(nil)
+	assert.Panics(t, func() { self.Union(nil) })
 }
 
 func TestUnionSizePanic(t *testing.T) {
-	defer func() {
-		r := recover()
-		assert.Equal(t, r, "Union: size different!")
-	}()
-
 	self := make(Dependencies, 10)
 	other := make(Dependencies, 5)
-	self.Union(other)
+	assert.Panics(t, func() { self.Union(other) })
 }
 
 // TestUnion tests the result of the Union operation

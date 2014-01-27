@@ -41,7 +41,7 @@ func (b *Ballot) FromUint64(num uint64) {
 
 func (b *Ballot) Compare(other *Ballot) int {
 	if b == nil || other == nil {
-		panic("ballot should not be nil")
+		panic("Compare: ballot should not be nil")
 	}
 	if b.epoch > other.epoch {
 		return 1

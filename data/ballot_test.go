@@ -41,11 +41,6 @@ func TestBallotCompare(t *testing.T) {
 	b1 = &Ballot{0, 0, 1}
 	b2 = &Ballot{0, 0, 1}
 
-	defer func() {
-		r := recover()
-		assert.Equal(t, r, "ballot should not be nil")
-	}()
-
 	assert.True(t, b1.Compare(b2) == 0)
 
 	b2 = &Ballot{0, 0, 2}
@@ -84,7 +79,7 @@ func TestBallotCompare(t *testing.T) {
 	b1 = &Ballot{0, 1, 0}
 	assert.True(t, b1.Compare(b2) > 0)
 
-	b1.Compare(nil)
+	assert.Panics(t, func() { b1.Compare(nil) })
 }
 
 func TestIncNumber(t *testing.T) {
