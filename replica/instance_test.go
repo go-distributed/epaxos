@@ -119,3 +119,13 @@ func TestCommittedProcessPreAcceptReply(t *testing.T) {
 	assert.Equal(t, action, noAction, "")
 	assert.Nil(t, retMsg, "")
 }
+
+// TestCheckStatus tests the behaviour of checkStatus
+func TestCheckStatus(t *testing.T) {
+	i := &Instance{
+		status: committed,
+	}
+
+	assert.Panics(t, func() { i.checkStatus(preAccepted, accepted, preparing, executed) })
+	assert.NotPanics(t, func() { i.checkStatus(committed) })
+}

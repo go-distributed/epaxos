@@ -107,7 +107,7 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 // ******************************
 
 func (i *Instance) nilStatusProcess(m Message) (uint8, Message) {
-	if i.status != nilStatus {
+	if !i.isAtStatus(nilStatus) {
 		panic("")
 	}
 
@@ -124,31 +124,41 @@ func (i *Instance) nilStatusProcess(m Message) (uint8, Message) {
 }
 
 func (i *Instance) committedProcess(m Message) (uint8, Message) {
-	if i.status != committed {
+	defer i.checkStatus(committed)
+
+	if !i.isAtStatus(committed) {
 		panic("")
 	}
 
 	switch content := m.Content().(type) {
-	case *data.PreAcceptReply:
-		content = content
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
+		// ignore delayed replies
 		return noAction, nil
+	case *data.Accept:
+		//return i.rejectPreAccept(content)
+	case *data.Prepare:
+		return i.handlePrepare(content)
 	default:
 		panic("")
 	}
+	panic("")
 }
 
 func (i *Instance) acceptedProcess(m Message) (uint8, Message) {
-	if i.status != accepted {
+	defer i.checkStatus(accepted, committed)
+
+	if !i.isAtStatus(accepted) {
 		panic("")
 	}
 
 	switch content := m.Content().(type) {
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+		// ignore delayed replies
 		return noAction, nil
 	case *data.PreAccept:
-		return i.handlePreAccept(content)
+		//return i.rejectPreAccept(content)
 	case *data.Accept:
-		return i.handleAccept(content)
+		//return i.rejectAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
@@ -159,6 +169,25 @@ func (i *Instance) acceptedProcess(m Message) (uint8, Message) {
 	default:
 		panic("")
 	}
+	panic("")
+}
+
+func (i *Instance) preAcceptedProcess(m Message) (uint8, Message) {
+	defer i.checkStatus(preAccepted, accepted, committed)
+
+	if !i.isAtStatus(preAccepted) {
+		panic("")
+	}
+
+	switch content := m.Content().(type) {
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+		// ignore delayed replies
+		return noAction, nil
+	case *data.PreAccept:
+		_ = content
+		panic("")
+	}
+	panic("")
 }
 
 // ******************************
@@ -229,4 +258,19 @@ func (i *Instance) handlePrepare(p *data.Prepare) (uint8, Message) {
 	}
 
 	return replyAction, pr
+}
+
+// checkStatus checks the status of the instance
+// it panics if the instance's status is not as expected
+func (i *Instance) checkStatus(statusList ...uint8) {
+	ok := false
+	for _, status := range statusList {
+		if i.isAtStatus(status) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		panic("")
+	}
 }
