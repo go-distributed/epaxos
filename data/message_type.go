@@ -1,7 +1,7 @@
 package data
 
 const (
-	proposeType = iota + 1
+	proposeType uint8 = iota + 1
 	preAcceptType
 	preAcceptOKType
 	preAcceptReplyType

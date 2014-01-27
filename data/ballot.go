@@ -40,11 +40,8 @@ func (b *Ballot) FromUint64(num uint64) {
 }
 
 func (b *Ballot) Compare(other *Ballot) int {
-	if b == nil {
-		return -1
-	}
-	if other == nil {
-		return 1
+	if b == nil || other == nil {
+		panic("ballot should not be nil")
 	}
 	if b.epoch > other.epoch {
 		return 1
