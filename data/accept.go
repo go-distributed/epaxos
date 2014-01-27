@@ -1,10 +1,10 @@
 package data
 
 type Accept struct {
-	Cmds       []Command
-	Seq        int
-	Deps       []uint64
-	ReplicaId  int
+	Cmds       Commands
+	Seq        uint32
+	Deps       Dependencies
+	ReplicaId  uint8
 	InstanceId uint64
 	Ballot     *Ballot
 }
@@ -18,7 +18,7 @@ type AcceptReply struct {
 }
 
 func (a *Accept) Type() uint8 {
-	return acceptType
+	return AcceptMsg
 }
 
 func (a *Accept) Content() interface{} {
@@ -26,7 +26,7 @@ func (a *Accept) Content() interface{} {
 }
 
 func (a *AcceptReply) Type() uint8 {
-	return acceptReplyType
+	return AcceptReplyMsg
 }
 
 func (a *AcceptReply) Content() interface{} {

@@ -1,11 +1,11 @@
 package data
 
 type PreAccept struct {
-	Cmds       []Command
-	Seq        uint32
-	Deps       []uint64
 	ReplicaId  uint8
 	InstanceId uint64
+	Cmds       Commands
+	Seq        uint32
+	Deps       Dependencies
 	Ballot     *Ballot
 }
 
@@ -14,26 +14,27 @@ type PreAcceptOk struct {
 }
 
 type PreAcceptReply struct {
-	Deps       []uint64
 	ReplicaId  uint8
 	InstanceId uint64
+	seq        uint32
+	Deps       Dependencies
 	Ok         bool
 }
 
 func (p *PreAccept) Type() uint8 {
-	return preAcceptType
+	return PreAcceptMsg
 }
 func (p *PreAccept) Content() interface{} {
 	return p
 }
 func (p *PreAcceptOk) Type() uint8 {
-	return preAcceptOKType
+	return PreAcceptOkMsg
 }
 func (p *PreAcceptOk) Content() interface{} {
 	return p
 }
 func (p *PreAcceptReply) Type() uint8 {
-	return preAcceptReplyType
+	return PreAcceptReplyMsg
 }
 func (p *PreAcceptReply) Content() interface{} {
 	return p

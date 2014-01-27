@@ -1,6 +1,7 @@
 package replica
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/go-epaxos/epaxos/data"
@@ -8,8 +9,63 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNilStatusProcessPropose(t *testing.T) {
+var _ = fmt.Printf
 
+// **************************
+// **** COMMON ROUTINE ******
+// **************************
+
+func commonTestlibExampleCommands() data.Commands {
+	return data.Commands{
+		data.Command("hello"),
+	}
+}
+
+// ************************
+// ****** Nil Status ******
+// ************************
+
+func instanceTestNilStatusProcessSetup() *Instance {
+	r := New(0, 5, new(test.DummySM))
+	i := NewInstance(r, conflictNotFound+1)
+	return i
+}
+
+// If a nilstatus instance receives propose, it should change its status to
+// preaccepted, return (broadcastAction, pre-accept message) and setup relevant
+// information.
+// The instance should also be ready to receive pre-accept reply. That means the
+// relevant info should be set.
+func TestNilStatusProcessPropose(t *testing.T) {
+	i := instanceTestNilStatusProcessSetup()
+	i.status = nilStatus
+	p := &data.Propose{
+		Cmds: commonTestlibExampleCommands(),
+	}
+	action, m := i.nilStatusProcess(p)
+	if !assert.IsType(t, &data.PreAccept{}, m) {
+		t.Fatal("")
+	}
+
+	pa := m.(*data.PreAccept)
+	assert.Equal(t, i.status, preAccepted)
+	assert.Equal(t, action, fastQuorumAction)
+
+	if !assert.ObjectsAreEqual(pa, &data.PreAccept{
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Cmds:       commonTestlibExampleCommands(),
+		Seq:        0,
+		Deps:       i.deps,
+		Ballot:     i.replica.MakeInitialBallot(),
+	}) {
+		fmt.Printf("%v\n", pa)
+		t.Fatal("")
+	}
+
+	assert.Equal(t, i.info.preAcceptCount, 0)
+	assert.Equal(t, i.info.preAcceptNackCount, 0)
+	assert.True(t, i.info.isFastPath)
 }
 
 func TestNilStatusProcessPreAccept(t *testing.T) {
@@ -24,15 +80,26 @@ func TestNilStatusProcessCommit(t *testing.T) {
 func TestNilStatusOnCommitDependency(t *testing.T) {
 }
 
-// When a committed instance receives pre-accept message, it should ignore it
-func TestCommittedProcessPreAccept(t *testing.T) {
+// **********************
+// *****  ACCEPTED ******
+// **********************
+
+func TestAcceptedProcessPrepare(t *testing.T) {
+}
+
+// **********************
+// ***** COMMITTED ******
+// **********************
+
+// When a committed instance receives pre-accept reply, it should ignore it
+func TestCommittedProcessPreAcceptReply(t *testing.T) {
 	// create an new instance
 	r := New(0, 5, new(test.DummySM))
 	i := NewInstance(r, conflictNotFound+1)
 	// set its status to committed
 	i.status = committed
 	// send a pre-accept message to it
-	msg := &data.PreAccept{}
+	msg := &data.PreAcceptReply{}
 	action, retMsg := i.committedProcess(msg)
 
 	// expect:

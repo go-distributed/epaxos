@@ -15,15 +15,17 @@ func TestType(t *testing.T) {
 	c := &Commit{}
 	pp := &Prepare{}
 	ppr := &PrepareReply{}
+	pps := &Propose{}
 
-	assert.Equal(t, p.Type(), preAcceptType)
-	assert.Equal(t, pr.Type(), preAcceptReplyType)
-	assert.Equal(t, po.Type(), preAcceptOKType)
-	assert.Equal(t, a.Type(), acceptType)
-	assert.Equal(t, ar.Type(), acceptReplyType)
-	assert.Equal(t, c.Type(), commitType)
-	assert.Equal(t, pp.Type(), prepareType)
-	assert.Equal(t, ppr.Type(), prepareReplyType)
+	assert.Equal(t, p.Type(), PreAcceptMsg)
+	assert.Equal(t, pr.Type(), PreAcceptReplyMsg)
+	assert.Equal(t, po.Type(), PreAcceptOkMsg)
+	assert.Equal(t, a.Type(), AcceptMsg)
+	assert.Equal(t, ar.Type(), AcceptReplyMsg)
+	assert.Equal(t, c.Type(), CommitMsg)
+	assert.Equal(t, pp.Type(), PrepareMsg)
+	assert.Equal(t, ppr.Type(), PrepareReplyMsg)
+	assert.Equal(t, pps.Type(), ProposeMsg)
 }
 
 func TestContent(t *testing.T) {
@@ -35,6 +37,7 @@ func TestContent(t *testing.T) {
 	c := &Commit{}
 	pp := &Prepare{}
 	ppr := &PrepareReply{}
+	pps := &Propose{}
 
 	assert.Equal(t, p.Content(), p)
 	assert.Equal(t, pr.Content(), pr)
@@ -44,4 +47,5 @@ func TestContent(t *testing.T) {
 	assert.Equal(t, c.Content(), c)
 	assert.Equal(t, pp.Content(), pp)
 	assert.Equal(t, ppr.Content(), ppr)
+	assert.Equal(t, pps.Content(), pps)
 }

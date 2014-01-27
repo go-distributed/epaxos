@@ -1,9 +1,10 @@
 package data
 
 type Prepare struct {
-	Ballot     *Ballot
-	ReplicaId  uint8
-	InstanceId uint64
+	Ballot          *Ballot
+	ReplicaId       uint8
+	InstanceId      uint64
+	needCmdsInReply bool
 }
 
 type PrepareReply struct {
@@ -12,12 +13,12 @@ type PrepareReply struct {
 	ReplicaId  uint8
 	InstanceId uint64
 	Status     int8
-	Cmds       []Command
-	Deps       []uint64
+	Cmds       Commands
+	Deps       Dependencies
 }
 
 func (p *Prepare) Type() uint8 {
-	return prepareType
+	return PrepareMsg
 }
 
 func (p *Prepare) Content() interface{} {
@@ -25,7 +26,7 @@ func (p *Prepare) Content() interface{} {
 }
 
 func (p *PrepareReply) Type() uint8 {
-	return prepareReplyType
+	return PrepareReplyMsg
 }
 
 func (p *PrepareReply) Content() interface{} {
