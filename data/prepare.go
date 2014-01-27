@@ -1,20 +1,20 @@
 package data
 
 type Prepare struct {
-	Ballot          *Ballot
 	ReplicaId       uint8
 	InstanceId      uint64
-	needCmdsInReply bool
+	Ballot          *Ballot
+	NeedCmdsInReply bool
 }
 
 type PrepareReply struct {
 	Ok         bool
-	Ballot     *Ballot
 	ReplicaId  uint8
 	InstanceId uint64
 	Status     uint8
 	Cmds       Commands
 	Deps       Dependencies
+	Ballot     *Ballot
 }
 
 func (p *Prepare) Type() uint8 {

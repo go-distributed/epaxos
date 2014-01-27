@@ -10,11 +10,11 @@ type Accept struct {
 }
 
 type AcceptReply struct {
-	ok         bool
-	replicaId  uint8
-	instanceId uint64
-	ballot     *Ballot
-	status     int8
+	Ok         bool
+	ReplicaId  uint8
+	InstanceId uint64
+	Ballot     *Ballot
+	Status     uint8
 }
 
 func (a *Accept) Type() uint8 {
