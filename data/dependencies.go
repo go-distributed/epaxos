@@ -1,9 +1,9 @@
-package replica
+package data
 
-type dependencies []uint64
+type Dependencies []uint64
 
 // union unions the deps into the receiver
-func (d dependencies) Union(other dependencies) bool {
+func (d Dependencies) Union(other Dependencies) bool {
 	if d == nil || other == nil {
 		panic("Union: dependencis should not be nil")
 	}
@@ -23,8 +23,8 @@ func (d dependencies) Union(other dependencies) bool {
 	return same
 }
 
-func (d dependencies) GetCopy() dependencies {
-	deps := make(dependencies, len(d))
+func (d Dependencies) GetCopy() Dependencies {
+	deps := make(Dependencies, len(d))
 	copy(deps, d)
 	return deps
 }

@@ -1,13 +1,14 @@
 package data
 
+// TODO: useless
 const (
-	proposeType = iota + 1
-	preAcceptType
-	preAcceptOKType
-	preAcceptReplyType
-	acceptType
-	acceptReplyType
-	commitType
-	prepareType
-	prepareReplyType
+	ProposeMsg = iota + 1
+	PreAcceptMsg
+	PreAcceptOkMsg
+	PreAcceptReplyMsg
+	AcceptMsg
+	AcceptReplyMsg
+	CommitMsg
+	PrepareMsg
+	PrepareReplyMsg
 )

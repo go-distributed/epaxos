@@ -27,10 +27,9 @@ const (
 // ****************************
 
 type Instance struct {
-	cmds data.Commands
-	seq  uint32
-	//deps   []uint64
-	deps   dependencies
+	cmds   data.Commands
+	seq    uint32
+	deps   data.Dependencies
 	status int8
 	ballot *data.Ballot
 
@@ -44,13 +43,15 @@ type Instance struct {
 
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
-	preAcceptCount int
-	isFastPath     bool
+	preAcceptCount     int
+	preAcceptNackCount int
+	isFastPath         bool
 
-	acceptNackCount int
 	acceptCount     int
+	acceptNackCount int
 
-	prepareCount int
+	prepareCount     int
+	prepareNackCount int
 }
 
 type RecoveryInfo struct {
@@ -59,7 +60,7 @@ type RecoveryInfo struct {
 	maxAcceptedBallot *data.Ballot
 
 	cmds         data.Commands
-	deps         dependencies
+	deps         data.Dependencies
 	status       int8
 	formerStatus int8
 }
@@ -74,6 +75,16 @@ func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
 		id:      instanceId,
 	}
 	return i
+}
+
+func NewInstanceInfo() *InstanceInfo {
+        return &InstanceInfo{
+                isFastPath: true,
+        }
+}
+
+func NewRecoveryInfo() *RecoveryInfo {
+        return &RecoveryInfo{}
 }
 
 // ****************************
@@ -95,14 +106,33 @@ func (i *Instance) isAtOrAfterStatus(status int8) bool {
 // ****** State Processing ******
 // ******************************
 
-func (i *Instance) committedProcess(m Message) (int8, Message) {
-	return noAction, nil
+func (i *Instance) nilStatusProcess(m Message) (int8, Message) {
+	if i.status != nilStatus {
+		panic("")
+	}
+
+	switch content := m.Content().(type) {
+	case *data.Propose:
+		if i.cmds != nil || i.seq != 0 || i.deps != nil ||
+			i.ballot != nil || i.info != nil || i.recoveryInfo != nil {
+			panic("")
+		}
+		return i.handlePropose(content)
+	default:
+		panic("")
+	}
 }
 
-// acceptProcess will handle:
-// Commit, Preparing
-// will ignore:
-// PreAccept, PreAcceptReply, Accept, AcceptReply, PrepareReply
+func (i *Instance) committedProcess(m Message) (int8, Message) {
+	switch content := m.Content().(type) {
+	case *data.PreAcceptReply:
+		content = content
+		return noAction, nil
+	default:
+		panic("")
+	}
+}
+
 func (i *Instance) acceptedProcess(m Message) (int8, Message) {
 	switch content := m.Content().(type) {
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
@@ -114,10 +144,38 @@ func (i *Instance) acceptedProcess(m Message) (int8, Message) {
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			// return replyAction, negative_reply
+		}
 		return i.handlePrepare(content)
 	default:
 		panic("")
 	}
+}
+
+// ******************************
+// ****** Handle Message  *******
+// ******************************
+
+// when handling propose, a propose will broadcast to fast quorum pre-accept messages.
+func (i *Instance) handlePropose(p *data.Propose) (int8, Message) {
+	seq, deps := i.replica.findDependencies(p.Cmds)
+	pa := &data.PreAccept{
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Cmds:       p.Cmds.GetCopy(),
+		Seq:        seq,
+		Deps:       deps.GetCopy(),
+		Ballot:     i.replica.MakeInitialBallot(),
+	}
+
+	i.cmds = p.Cmds.GetCopy()
+	i.deps = deps.GetCopy()
+	i.status = preAccepted
+	i.ballot = i.replica.MakeInitialBallot()
+	i.info = NewInstanceInfo()
+
+	return fastQuorumAction, pa
 }
 
 func (i *Instance) handlePreAccept(p *data.PreAccept) (int8, Message) {
@@ -141,13 +199,6 @@ func (i *Instance) handleCommit(c *data.Commit) (int8, Message) {
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (int8, Message) {
-	// TODO: can delete this assertion
-	if i.isAtStatus(nilStatus) {
-		if i.ballot.Compare(data.NewBallot(0, 0, i.replica.Id)) != 0 {
-			panic("ballot should be initial ballot")
-		}
-	}
-
 	ok := false
 	if p.Ballot.Compare(i.ballot) > 0 {
 		i.ballot = p.Ballot.GetCopy()
