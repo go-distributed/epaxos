@@ -1,5 +1,12 @@
 package data
 
 type Propose struct {
-	cmds []Command
+	Cmds Commands
+}
+
+func (p *Propose) Type() uint8 {
+	return ProposeMsg
+}
+func (p *Propose) Content() interface{} {
+	return p
 }

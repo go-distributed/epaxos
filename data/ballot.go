@@ -19,24 +19,29 @@ type Ballot struct {
 	replicaId uint8
 }
 
-func (b *Ballot) toUint64() uint64 {
+func NewBallot(epoch uint32, number uint64, replicId uint8) *Ballot {
+	return &Ballot{
+		epoch,
+		number,
+		replicId,
+	}
+}
+
+func (b *Ballot) ToUint64() uint64 {
 	return ((uint64(b.epoch) << (ballotNumberWidth + ballotReplicaIdWidth)) |
 		(b.number << ballotReplicaIdWidth) |
 		uint64(b.replicaId))
 }
 
-func (b *Ballot) fromUint64(num uint64) {
+func (b *Ballot) FromUint64(num uint64) {
 	b.epoch = uint32((num & ballotEpochMask) >> (ballotNumberWidth + ballotReplicaIdWidth))
 	b.number = ((num & ballotNumberMask) >> ballotReplicaIdWidth)
 	b.replicaId = uint8(num & ballotReplicaIdMask)
 }
 
 func (b *Ballot) Compare(other *Ballot) int {
-	if b == nil {
-		return -1
-	}
-	if other == nil {
-		return 1
+	if b == nil || other == nil {
+		panic("Compare: ballot should not be nil")
 	}
 	if b.epoch > other.epoch {
 		return 1
@@ -60,22 +65,30 @@ func (b *Ballot) Compare(other *Ballot) int {
 	return 0
 }
 
-func (b *Ballot) incNumber() {
+func (b *Ballot) IncNumber() {
 	b.number++
 }
 
-func (b *Ballot) getNumber() uint64 {
+func (b *Ballot) GetNumber() uint64 {
 	return b.number
 }
 
-func (b *Ballot) setReplicaId(rId int) {
+func (b *Ballot) SetReplicaId(rId int) {
 	b.replicaId = uint8(rId)
 }
 
-func (b *Ballot) getIncNumCopy() *Ballot {
+func (b *Ballot) GetIncNumCopy() *Ballot {
 	return &Ballot{
 		b.epoch,
 		b.number + 1,
+		b.replicaId,
+	}
+}
+
+func (b *Ballot) GetCopy() *Ballot {
+	return &Ballot{
+		b.epoch,
+		b.number,
 		b.replicaId,
 	}
 }
