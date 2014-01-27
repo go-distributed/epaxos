@@ -14,7 +14,7 @@ var _ = fmt.Printf
 
 // instance status
 const (
-	nilStatus int8 = iota + 1
+	nilStatus uint8 = iota + 1
 	preparing
 	preAccepted
 	accepted
@@ -30,7 +30,7 @@ type Instance struct {
 	cmds   data.Commands
 	seq    uint32
 	deps   data.Dependencies
-	status int8
+	status uint8
 	ballot *data.Ballot
 
 	info         *InstanceInfo
@@ -61,8 +61,8 @@ type RecoveryInfo struct {
 
 	cmds         data.Commands
 	deps         data.Dependencies
-	status       int8
-	formerStatus int8
+	status       uint8
+	formerStatus uint8
 }
 
 // ****************************
@@ -90,15 +90,15 @@ func NewRecoveryInfo() *RecoveryInfo {
 // ****************************
 // ******** tell status *******
 // ****************************
-func (i *Instance) isAtStatus(status int8) bool {
+func (i *Instance) isAtStatus(status uint8) bool {
 	return i.status == status
 }
 
-func (i *Instance) isAfterStatus(status int8) bool {
+func (i *Instance) isAfterStatus(status uint8) bool {
 	return i.status > status
 }
 
-func (i *Instance) isAtOrAfterStatus(status int8) bool {
+func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 	return i.status >= status
 }
 
@@ -106,7 +106,7 @@ func (i *Instance) isAtOrAfterStatus(status int8) bool {
 // ****** State Processing ******
 // ******************************
 
-func (i *Instance) nilStatusProcess(m Message) (int8, Message) {
+func (i *Instance) nilStatusProcess(m Message) (uint8, Message) {
 	if i.status != nilStatus {
 		panic("")
 	}
@@ -123,7 +123,7 @@ func (i *Instance) nilStatusProcess(m Message) (int8, Message) {
 	}
 }
 
-func (i *Instance) committedProcess(m Message) (int8, Message) {
+func (i *Instance) committedProcess(m Message) (uint8, Message) {
 	switch content := m.Content().(type) {
 	case *data.PreAcceptReply:
 		content = content
@@ -133,7 +133,7 @@ func (i *Instance) committedProcess(m Message) (int8, Message) {
 	}
 }
 
-func (i *Instance) acceptedProcess(m Message) (int8, Message) {
+func (i *Instance) acceptedProcess(m Message) (uint8, Message) {
 	switch content := m.Content().(type) {
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		return noAction, nil
@@ -158,7 +158,7 @@ func (i *Instance) acceptedProcess(m Message) (int8, Message) {
 // ******************************
 
 // when handling propose, a propose will broadcast to fast quorum pre-accept messages.
-func (i *Instance) handlePropose(p *data.Propose) (int8, Message) {
+func (i *Instance) handlePropose(p *data.Propose) (uint8, Message) {
 	seq, deps := i.replica.findDependencies(p.Cmds)
 	pa := &data.PreAccept{
 		ReplicaId:  i.replica.Id,
@@ -178,15 +178,15 @@ func (i *Instance) handlePropose(p *data.Propose) (int8, Message) {
 	return fastQuorumAction, pa
 }
 
-func (i *Instance) handlePreAccept(p *data.PreAccept) (int8, Message) {
+func (i *Instance) handlePreAccept(p *data.PreAccept) (uint8, Message) {
 	panic("")
 }
 
-func (i *Instance) handleAccept(a *data.Accept) (int8, Message) {
+func (i *Instance) handleAccept(a *data.Accept) (uint8, Message) {
 	panic("")
 }
 
-func (i *Instance) handleCommit(c *data.Commit) (int8, Message) {
+func (i *Instance) handleCommit(c *data.Commit) (uint8, Message) {
 	if i.isAtOrAfterStatus(committed) {
 		panic("")
 	}
@@ -198,7 +198,7 @@ func (i *Instance) handleCommit(c *data.Commit) (int8, Message) {
 	return noAction, nil
 }
 
-func (i *Instance) handlePrepare(p *data.Prepare) (int8, Message) {
+func (i *Instance) handlePrepare(p *data.Prepare) (uint8, Message) {
 	ok := false
 	if p.Ballot.Compare(i.ballot) > 0 {
 		i.ballot = p.Ballot.GetCopy()

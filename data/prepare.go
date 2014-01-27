@@ -12,7 +12,7 @@ type PrepareReply struct {
 	Ballot     *Ballot
 	ReplicaId  uint8
 	InstanceId uint64
-	Status     int8
+	Status     uint8
 	Cmds       Commands
 	Deps       Dependencies
 }

@@ -16,7 +16,7 @@ const conflictNotFound = 0
 
 // actions
 const (
-	noAction int8 = iota + 1
+	noAction uint8 = iota + 1
 	replyAction
 	fastQuorumAction
 	broadcastAction
