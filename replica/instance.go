@@ -1,5 +1,10 @@
 package replica
 
+// This file implements instance module.
+// @assumption:
+// - When a replica pass in the message to instance methods, we assume that the
+//    internal fields of message is readable only and safe to reference to.
+
 import (
 	"fmt"
 
@@ -87,9 +92,9 @@ func NewRecoveryInfo() *RecoveryInfo {
 	return &RecoveryInfo{}
 }
 
-// ****************************
-// ******** tell status *******
-// ****************************
+// *********************************
+// ******** INSTANCE FIELDS  *******
+// *********************************
 func (i *Instance) isAtStatus(status uint8) bool {
 	return i.status == status
 }
@@ -100,6 +105,14 @@ func (i *Instance) isAfterStatus(status uint8) bool {
 
 func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 	return i.status >= status
+}
+
+func (i *Instance) freshlyCreated() bool {
+	if i.cmds != nil || i.seq != 0 || i.deps != nil ||
+		i.ballot != nil || i.info != nil || i.recoveryInfo != nil {
+		return false
+	}
+	return true
 }
 
 // ******************************
@@ -113,8 +126,7 @@ func (i *Instance) nilStatusProcess(m Message) (uint8, Message) {
 
 	switch content := m.Content().(type) {
 	case *data.Propose:
-		if i.cmds != nil || i.seq != 0 || i.deps != nil ||
-			i.ballot != nil || i.info != nil || i.recoveryInfo != nil {
+		if !i.freshlyCreated() {
 			panic("")
 		}
 		return i.handlePropose(content)
@@ -153,7 +165,7 @@ func (i *Instance) acceptedProcess(m Message) (uint8, Message) {
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			// return replyAction, negative_reply
+			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
 	default:
@@ -162,11 +174,35 @@ func (i *Instance) acceptedProcess(m Message) (uint8, Message) {
 }
 
 // ******************************
+// ****** Reject Message  *******
+// ******************************
+
+// Prepare reply:
+// - ok : false
+// - Ballot: self (ballot)
+// - Status: self status
+// - relevant Ids
+func (i *Instance) rejectPrepare() (uint8, Message) {
+	pr := &data.PrepareReply{
+		Ok:         false,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Status:     i.status,
+		Ballot:     i.ballot.GetCopy(),
+	}
+
+	return replyAction, pr
+}
+
+// ******************************
 // ****** Handle Message  *******
 // ******************************
 
 // when handling propose, a propose will broadcast to fast quorum pre-accept messages.
 func (i *Instance) handlePropose(p *data.Propose) (uint8, Message) {
+	if p.Cmds == nil {
+		panic("")
+	}
 	seq, deps := i.replica.findDependencies(p.Cmds)
 	pa := &data.PreAccept{
 		ReplicaId:  i.replica.Id,
@@ -202,31 +238,32 @@ func (i *Instance) handleCommit(c *data.Commit) (uint8, Message) {
 	i.cmds = c.Cmds
 	i.deps = c.Deps
 	i.status = committed
+
+	// TODO: Do we need to clear unnecessary objects to save more memory?
 	// TODO: persistent
 	return noAction, nil
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (uint8, Message) {
-	ok := false
-	if p.Ballot.Compare(i.ballot) > 0 {
-		i.ballot = p.Ballot.GetCopy()
-		ok = true
-	}
+	i.ballot = p.Ballot
 
-	status := i.status
-	if status == preparing {
-		status = i.recoveryInfo.formerStatus
+	cmds := data.Commands(nil)
+	if p.NeedCmdsInReply {
+		cmds = i.cmds.GetCopy()
 	}
 
 	pr := &data.PrepareReply{
-		Ok:         ok,
-		Status:     status,
+		Ok:         true,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Cmds:       i.cmds.GetCopy(),
+		Status:     i.status,
+		Cmds:       cmds,
 		Deps:       i.deps.GetCopy(),
 		Ballot:     i.ballot.GetCopy(),
 	}
-
 	return replyAction, pr
 }
+
+// ****************************
+// ******* Make Message *******
+// ****************************

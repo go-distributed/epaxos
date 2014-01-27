@@ -109,13 +109,13 @@ func TestCommittedProcessPreAcceptReply(t *testing.T) {
 	// set its status to committed
 	i.status = committed
 	// send a pre-accept message to it
-	msg := &data.PreAcceptReply{}
-	action, retMsg := i.committedProcess(msg)
+	pa := &data.PreAcceptReply{}
+	action, m := i.committedProcess(pa)
 
 	// expect:
 	// - action: NoAction
 	// - message: nil
 	// - instance not changed
 	assert.Equal(t, action, noAction, "")
-	assert.Nil(t, retMsg, "")
+	assert.Nil(t, m, "")
 }
