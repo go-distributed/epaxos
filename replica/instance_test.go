@@ -104,7 +104,6 @@ func TestNilStatusProcessPropose(t *testing.T) {
 	}))
 
 	assert.Equal(t, i.info.preAcceptCount, 0)
-	assert.Equal(t, i.info.preAcceptNackCount, 0)
 	assert.True(t, i.info.isFastPath)
 }
 
@@ -132,18 +131,23 @@ func TestPreAcceptedProcessStatus(t *testing.T) {
 	assert.Panics(t, func() { inst.preAcceptedProcess(ac) })
 }
 
-// TestPreAcceptedProcessPreAccept tests
+// When preAccepted instance receives a pre-accept,
+// If ballot > self ballot,
 // if preAcceptedProcess accepts or
 // rejects the PreAccept message correctly
 func TestPreAcceptedProcessPreAccept(t *testing.T) {
 	inst := commonTestlibExamplePreAcceptedInstance()
-	inst.ballot = data.NewBallot(2, 3, inst.replica.Id)
+	instanceBallot := data.NewBallot(2, 3, inst.replica.Id)
+	smallerBallot := data.NewBallot(2, 2, inst.replica.Id)
+	largerBallot := data.NewBallot(2, 4, inst.replica.Id)
+
+	inst.ballot = instanceBallot
 
 	// PreAccept with smaller ballot
-	pa := &data.PreAccept{
-		Ballot: data.NewBallot(0, 3, inst.replica.Id),
+	p := &data.PreAccept{
+		Ballot: smallerBallot,
 	}
-	action, reply := inst.preAcceptedProcess(pa)
+	action, reply := inst.preAcceptedProcess(p)
 
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, reply, &data.PreAcceptReply{
@@ -153,24 +157,26 @@ func TestPreAcceptedProcessPreAccept(t *testing.T) {
 		Ballot:     inst.ballot,
 	})
 
-	// TODO: PreAccept with larger ballot
-	pa = &data.PreAccept{
-		Cmds: data.Commands{
-			data.Command("hello"),
-		},
-		Deps:   data.Dependencies{1, 0, 0, 8, 6},
-		Seq:    42,
-		Ballot: data.NewBallot(3, 3, inst.replica.Id),
+	expectedSeq := uint32(42)
+	expectedDeps := data.Dependencies{1, 0, 0, 8, 6}
+
+	// PreAccept with larger ballot
+	p = &data.PreAccept{
+		Cmds:   commonTestlibExampleCommands(),
+		Deps:   expectedDeps,
+		Seq:    expectedSeq,
+		Ballot: largerBallot,
 	}
-	action, reply = inst.preAcceptedProcess(pa)
+	action, reply = inst.preAcceptedProcess(p)
 
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, reply, &data.PreAcceptReply{
 		Ok:         true,
 		ReplicaId:  inst.replica.Id,
 		InstanceId: inst.id,
-		Seq:        42,
-		Deps:       pa.Deps,
+		Seq:        expectedSeq,
+		Deps:       expectedDeps,
+		Ballot:     largerBallot,
 	})
 }
 

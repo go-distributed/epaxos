@@ -35,6 +35,7 @@ func TestMakeInitialBallot(t *testing.T) {
 	assert.Equal(t, b, data.NewBallot(3, 0, 3))
 }
 
+// return a replica with id=5, size=5, and maxinstancenum of [1,2,3,4,5]
 func depsTestSetupReplica() (r *Replica) {
 	r = New(5, 5, new(test.DummySM))
 	for i := 0; i < 5; i++ {
