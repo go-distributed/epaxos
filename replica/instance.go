@@ -49,14 +49,11 @@ type Instance struct {
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
 	preAcceptCount     int
-	preAcceptNackCount int
 	isFastPath         bool
 
 	acceptCount     int
-	acceptNackCount int
 
 	prepareCount     int
-	prepareNackCount int
 }
 
 type RecoveryInfo struct {
@@ -108,19 +105,21 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 }
 
 func (i *Instance) freshlyCreated() bool {
-	if i.cmds != nil || i.seq != 0 || i.deps != nil ||
-		i.ballot != nil || i.info != nil || i.recoveryInfo != nil {
-		return false
+	if i.ballot == nil {
+		return true
 	}
-	return true
+	return false
 }
 
 // ******************************
 // ****** State Processing ******
 // ******************************
 
-func (i *Instance) nilStatusProcess(m Message) (uint8, Message) {
-	if i.status != nilStatus {
+// TODO: building
+func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
+	defer i.checkStatus(preAccepted)
+
+	if !i.isAtStatus(nilStatus) {
 		panic("")
 	}
 
@@ -130,37 +129,68 @@ func (i *Instance) nilStatusProcess(m Message) (uint8, Message) {
 			panic("")
 		}
 		return i.handlePropose(content)
-	default:
-		panic("")
-	}
-}
-
-func (i *Instance) committedProcess(m Message) (uint8, Message) {
-	if i.status != committed {
-		panic("")
-	}
-
-	switch content := m.Content().(type) {
-	case *data.PreAcceptReply:
-		content = content
-		return noAction, nil
-	default:
-		panic("")
-	}
-}
-
-func (i *Instance) acceptedProcess(m Message) (uint8, Message) {
-	if i.status != accepted {
-		panic("")
-	}
-
-	switch content := m.Content().(type) {
-	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
-		return noAction, nil
 	case *data.PreAccept:
+		if !i.freshlyCreated() && content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectPreAccept()
+		}
 		return i.handlePreAccept(content)
+	default:
+		panic("")
+	}
+}
+
+// TODO: finish building, need testing
+func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
+	defer i.checkStatus(preAccepted, accepted, committed)
+
+	if !i.isAtStatus(preAccepted) {
+		panic("")
+	}
+
+	switch content := m.Content().(type) {
+	case *data.PreAccept:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectPreAccept()
+		}
+		return i.handlePreAccept(content)
+
 	case *data.Accept:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectAccept()
+		}
 		return i.handleAccept(content)
+
+	case *data.Commit:
+		return i.handleCommit(content)
+	case *data.Prepare:
+		return i.handlePrepare(content)
+	case *data.PreAcceptReply:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			// ignore stale PreAcceptReply
+			return noAction, nil
+		}
+		return i.handlePreAcceptReply(content)
+	case *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+		// ignore delayed replies
+		return noAction, nil
+	default:
+		panic("")
+	}
+}
+
+// TODO: building
+func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
+	defer i.checkStatus(accepted, committed)
+
+	if !i.isAtStatus(accepted) {
+		panic("")
+	}
+
+	switch content := m.Content().(type) {
+	case *data.PreAccept:
+		return i.rejectPreAccept()
+	case *data.Accept:
+		return i.rejectAccept()
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
@@ -168,43 +198,99 @@ func (i *Instance) acceptedProcess(m Message) (uint8, Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
+
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+		// ignore delayed replies
+		return noAction, nil
+	default:
+	}
+	panic("")
+}
+
+// TODO: finishing building, need test
+func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
+	defer i.checkStatus(committed)
+
+	if !i.isAtStatus(committed) {
+		panic("")
+	}
+
+	switch content := m.Content().(type) {
+	case *data.PreAccept:
+		return i.rejectPreAccept()
+	case *data.Accept:
+		return i.rejectAccept()
+	case *data.Prepare:
+		return i.handlePrepare(content)
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
+		// ignore delayed replies
+		return noAction, nil
 	default:
 		panic("")
 	}
 }
 
 // ******************************
-// ****** Reject Message  *******
+// ****** Reject Messages *******
 // ******************************
+
+// PreAccept reply:
+// - ok : false
+// - Ballot: self (ballot)
+// - Ids
+func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) {
+	return replyAction, i.makePreAcceptReply(false, 0, nil)
+}
+
+// rejectAccept rejects the Accept request with a AcceptReply:
+// - Ok: false
+// - Ballot: self.ballot
+// - ReplicaId: self.replica.id
+// - InstanceId: self.id
+// - other fields: undefined
+func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
+	// TODO: assert contition holds
+	return replyAction, &data.AcceptReply{
+		Ok:         false,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Ballot:     i.ballot.GetCopy(),
+	}
+}
 
 // Prepare reply:
 // - ok : false
 // - Ballot: self (ballot)
-// - Status: self status
 // - relevant Ids
-func (i *Instance) rejectPrepare() (uint8, Message) {
-	pr := &data.PrepareReply{
+func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
+	return replyAction, &data.PrepareReply{
 		Ok:         false,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Status:     i.status,
 		Ballot:     i.ballot.GetCopy(),
+		Status:     i.status, //unnecessary, but it doesn't hurt
 	}
-
-	return replyAction, pr
 }
 
 // ******************************
 // ****** Handle Message  *******
 // ******************************
 
-// when handling propose, a propose will broadcast to fast quorum pre-accept messages.
-func (i *Instance) handlePropose(p *data.Propose) (uint8, Message) {
+// a propose will broadcasted to fast quorum in pre-accept message.
+func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAccept) {
 	if p.Cmds == nil {
 		panic("")
 	}
 	seq, deps := i.replica.findDependencies(p.Cmds)
-	pa := &data.PreAccept{
+
+	i.cmds = p.Cmds.GetCopy()
+	i.seq = seq
+	i.deps = deps.GetCopy()
+	i.status = preAccepted
+	i.ballot = i.replica.MakeInitialBallot()
+	i.info = NewInstanceInfo()
+
+	return fastQuorumAction, &data.PreAccept{
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
 		Cmds:       p.Cmds.GetCopy(),
@@ -212,25 +298,49 @@ func (i *Instance) handlePropose(p *data.Propose) (uint8, Message) {
 		Deps:       deps.GetCopy(),
 		Ballot:     i.replica.MakeInitialBallot(),
 	}
-
-	i.cmds = p.Cmds.GetCopy()
-	i.deps = deps.GetCopy()
-	i.status = preAccepted
-	i.ballot = i.replica.MakeInitialBallot()
-	i.info = NewInstanceInfo()
-
-	return fastQuorumAction, pa
 }
 
-func (i *Instance) handlePreAccept(p *data.PreAccept) (uint8, Message) {
+// When handling pre-accept, instance will set its ballot to newer one, and
+// update seq, deps if find any change.
+// Reply: pre-accept-OK if no change in deps; otherwise a normal pre-accept-reply.
+// The pre-accept-OK contains just one field. So we do it for network optimization
+func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message) {
+	i.ballot = p.Ballot
+	seq, deps, changed := i.replica.updateDependencies(p.Cmds, p.Seq, p.Deps, p.ReplicaId)
+
+	if changed {
+		i.seq, i.deps = seq, deps
+		return replyAction, i.makePreAcceptReply(true, seq, deps)
+	}
+	// not initial leader
+	if p.Ballot.GetNumber() != 0 {
+		return replyAction, i.makePreAcceptReply(true, seq, deps)
+	}
+	// pre-accept-ok for possible fast quorum commit
+	return replyAction, &data.PreAcceptOk{
+		InstanceId: i.id,
+	}
+}
+
+// handlePreAcceptReply() handles PreAcceptReplies,
+// Update:
+// - ballot
+// - if ok=true, union seq, deps, and update counts
+// Broadcast Action happens:
+// 1, if receiving >= fast quorum replies with same deps and seq,
+//    and the instance itself is initial leader,
+//    then broadcast Commit
+// 2, otherwise broadcast Accept
+func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, msg Message) {
 	panic("")
 }
 
-func (i *Instance) handleAccept(a *data.Accept) (uint8, Message) {
+func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
 	panic("")
 }
 
-func (i *Instance) handleCommit(c *data.Commit) (uint8, Message) {
+// TODO: need testing
+func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 	if i.isAtOrAfterStatus(committed) {
 		panic("")
 	}
@@ -244,15 +354,17 @@ func (i *Instance) handleCommit(c *data.Commit) (uint8, Message) {
 	return noAction, nil
 }
 
-func (i *Instance) handlePrepare(p *data.Prepare) (uint8, Message) {
-	i.ballot = p.Ballot
-
-	cmds := data.Commands(nil)
+// handlePrepare handles Prepare messages
+func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
+	var cmds data.Commands
+	cmds = nil
 	if p.NeedCmdsInReply {
 		cmds = i.cmds.GetCopy()
 	}
 
-	pr := &data.PrepareReply{
+	i.ballot = p.Ballot
+
+	return replyAction, &data.PrepareReply{
 		Ok:         true,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
@@ -261,9 +373,34 @@ func (i *Instance) handlePrepare(p *data.Prepare) (uint8, Message) {
 		Deps:       i.deps.GetCopy(),
 		Ballot:     i.ballot.GetCopy(),
 	}
-	return replyAction, pr
+}
+
+// checkStatus checks the status of the instance
+// it panics if the instance's status is not as expected
+func (i *Instance) checkStatus(statusList ...uint8) {
+	ok := false
+	for _, status := range statusList {
+		if i.isAtStatus(status) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		panic("")
+	}
 }
 
 // ****************************
 // ******* Make Message *******
 // ****************************
+
+func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencies) *data.PreAcceptReply {
+	return &data.PreAcceptReply{
+		Ok:         ok,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Seq:        seq,
+		Deps:       deps,
+		Ballot:     i.ballot.GetCopy(),
+	}
+}
