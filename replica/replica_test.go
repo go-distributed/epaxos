@@ -71,11 +71,11 @@ func TestUpdateDependencies(t *testing.T) {
 	assert.Equal(t, notChangedSeq, seq)
 	assert.Equal(t, notChangedDeps, selfDeps)
 
-        emptyDeps := data.Dependencies{0, 0, 0, 0, 0}
-        expectedDeps := data.Dependencies{0, 2, 3, 4, 5} // it's from r0
+	emptyDeps := data.Dependencies{0, 0, 0, 0, 0}
+	expectedDeps := data.Dependencies{0, 2, 3, 4, 5} // it's from r0
 
 	changedSeq, changedDeps, changed := r.updateDependencies(
-		cmds, 0, emptyDeps , 0)
+		cmds, 0, emptyDeps, 0)
 	assert.True(t, changed)
 	assert.Equal(t, changedSeq, uint32(1))
 	assert.Equal(t, changedDeps, expectedDeps)

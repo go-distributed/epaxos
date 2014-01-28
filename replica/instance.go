@@ -173,6 +173,7 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 			return noAction, nil
 		}
 		return i.handlePreAcceptReply(content)
+
 	case *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
@@ -181,7 +182,7 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// TODO: building
+// finish building, need testing
 func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(accepted, committed)
 
@@ -202,12 +203,19 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 		}
 		return i.handlePrepare(content)
 
-	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+	case *data.AcceptReply:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			// ignore stale PreAcceptReply
+			return noAction, nil
+		}
+		return i.handleAcceptReply(content)
+
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
 	default:
+		panic("")
 	}
-	panic("")
 }
 
 // TODO: finishing building, need test
@@ -231,6 +239,11 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	default:
 		panic("")
 	}
+}
+
+// TODO: building
+func (i *Instance) prepareProcess(m Message) (action uint8, msg Message) {
+	panic("")
 }
 
 // ******************************
@@ -336,6 +349,14 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 }
 
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
+	panic("")
+}
+
+// handleAcceptReply() handles AcceptReplies,
+// 1, if receiving majority replies with ok == true,
+// then broadcast Commit
+// 2, otherwise: do nothing.
+func (i *Instance) handleAcceptReply(p *data.AcceptReply) (action uint8, msg Message) {
 	panic("")
 }
 
