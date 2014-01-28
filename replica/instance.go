@@ -49,14 +49,11 @@ type Instance struct {
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
 	preAcceptCount     int
-	preAcceptNackCount int
 	isFastPath         bool
 
 	acceptCount     int
-	acceptNackCount int
 
 	prepareCount     int
-	prepareNackCount int
 }
 
 type RecoveryInfo struct {
@@ -242,7 +239,7 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 // - Ballot: self (ballot)
 // - Ids
 func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) {
-	return replyAction, i.makePreAcceptReply(false, 0, nil, i.ballot.GetCopy())
+	return replyAction, i.makePreAcceptReply(false, 0, nil)
 }
 
 // rejectAccept rejects the Accept request with a AcceptReply:
@@ -313,11 +310,11 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 
 	if changed {
 		i.seq, i.deps = seq, deps
-		return replyAction, i.makePreAcceptReply(true, seq, deps, nil)
+		return replyAction, i.makePreAcceptReply(true, seq, deps)
 	}
 	// not initial leader
 	if p.Ballot.GetNumber() != 0 {
-		return replyAction, i.makePreAcceptReply(true, seq, deps, nil)
+		return replyAction, i.makePreAcceptReply(true, seq, deps)
 	}
 	// pre-accept-ok for possible fast quorum commit
 	return replyAction, &data.PreAcceptOk{
@@ -326,11 +323,14 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 }
 
 // handlePreAcceptReply() handles PreAcceptReplies,
+// Update:
+// - ballot
+// - if ok=true, union seq, deps, and update counts
+// Broadcast Action happens:
 // 1, if receiving >= fast quorum replies with same deps and seq,
-// then broadcast Commit
-// 2, if receiving majority replies with different deps and seq,
-// then broadcast Accept
-// 3, otherwise: do nothing.
+//    and the instance itself is initial leader,
+//    then broadcast Commit
+// 2, otherwise broadcast Accept
 func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, msg Message) {
 	panic("")
 }
@@ -394,14 +394,13 @@ func (i *Instance) checkStatus(statusList ...uint8) {
 // ******* Make Message *******
 // ****************************
 
-func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencies,
-	ballot *data.Ballot) *data.PreAcceptReply {
+func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencies) *data.PreAcceptReply {
 	return &data.PreAcceptReply{
 		Ok:         ok,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
 		Seq:        seq,
 		Deps:       deps,
-		Ballot:     ballot,
+		Ballot:     i.ballot.GetCopy(),
 	}
 }
