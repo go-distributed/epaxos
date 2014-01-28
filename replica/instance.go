@@ -167,7 +167,13 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleCommit(content)
 	case *data.Prepare:
 		return i.handlePrepare(content)
-	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+	case *data.PreAcceptReply:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			// ignore stale PreAcceptReply
+			return noAction, nil
+		}
+		return i.handlePreAcceptReply(content)
+	case *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
 	default:
@@ -195,7 +201,7 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
-		
+
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
@@ -317,6 +323,16 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	return replyAction, &data.PreAcceptOk{
 		InstanceId: i.id,
 	}
+}
+
+// handlePreAcceptReply() handles PreAcceptReplies,
+// 1, if receiving >= fast quorum replies with same deps and seq,
+// then broadcast Commit
+// 2, if receiving majority replies with different deps and seq,
+// then broadcast Accept
+// 3, otherwise: do nothing.
+func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, msg Message) {
+	panic("")
 }
 
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {

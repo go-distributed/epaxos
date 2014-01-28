@@ -137,16 +137,16 @@ func TestPreAcceptedProcessStatus(t *testing.T) {
 // rejects the PreAccept message correctly
 func TestPreAcceptedProcessPreAccept(t *testing.T) {
 	inst := commonTestlibExamplePreAcceptedInstance()
-	inst.ballot = data.NewBallot(2, inst.id, inst.replica.Id)
+	inst.ballot = data.NewBallot(2, 3, inst.replica.Id)
 
 	// PreAccept with smaller ballot
 	pa := &data.PreAccept{
-		Ballot: data.NewBallot(0, inst.id, inst.replica.Id),
+		Ballot: data.NewBallot(0, 3, inst.replica.Id),
 	}
-	action, msg := inst.preAcceptedProcess(pa)
+	action, reply := inst.preAcceptedProcess(pa)
 
 	assert.Equal(t, action, replyAction)
-	assert.Equal(t, msg, &data.PreAcceptReply{
+	assert.Equal(t, reply, &data.PreAcceptReply{
 		Ok:         false,
 		ReplicaId:  inst.replica.Id,
 		InstanceId: inst.id,
@@ -160,9 +160,18 @@ func TestPreAcceptedProcessPreAccept(t *testing.T) {
 		},
 		Deps:   data.Dependencies{1, 0, 0, 8, 6},
 		Seq:    42,
-		Ballot: data.NewBallot(0, inst.id, inst.replica.Id),
+		Ballot: data.NewBallot(3, 3, inst.replica.Id),
 	}
-	//action, msg = inst.preAcceptedProcess(pa)
+	action, reply = inst.preAcceptedProcess(pa)
+
+	assert.Equal(t, action, replyAction)
+	assert.Equal(t, reply, &data.PreAcceptReply{
+		Ok:         true,
+		ReplicaId:  inst.replica.Id,
+		InstanceId: inst.id,
+		Seq:        42,
+		Deps:       pa.Deps,
+	})
 }
 
 // **********************
