@@ -120,6 +120,51 @@ func TestNilStatusProcessCommit(t *testing.T) {
 func TestNilStatusOnCommitDependency(t *testing.T) {
 }
 
+// ************************
+// ****** PREACCEPTED *****
+// ************************
+
+// TestPreAcceptedProcessStatus tests
+// if preAcceptedProcess panics as expected
+func TestPreAcceptedProcessStatus(t *testing.T) {
+	inst := commonTestlibExampleAcceptedInstance()
+	ac := &data.Accept{}
+	assert.Panics(t, func() { inst.preAcceptedProcess(ac) })
+}
+
+// TestPreAcceptedProcessPreAccept tests
+// if preAcceptedProcess accepts or
+// rejects the PreAccept message correctly
+func TestPreAcceptedProcessPreAccept(t *testing.T) {
+	inst := commonTestlibExamplePreAcceptedInstance()
+	inst.ballot = data.NewBallot(2, inst.id, inst.replica.Id)
+
+	// PreAccept with smaller ballot
+	pa := &data.PreAccept{
+		Ballot: data.NewBallot(0, inst.id, inst.replica.Id),
+	}
+	action, msg := inst.preAcceptedProcess(pa)
+
+	assert.Equal(t, action, replyAction)
+	assert.Equal(t, msg, &data.PreAcceptReply{
+		Ok:         false,
+		ReplicaId:  inst.replica.Id,
+		InstanceId: inst.id,
+		Ballot:     inst.ballot,
+	})
+
+	// TODO: PreAccept with larger ballot
+	pa = &data.PreAccept{
+		Cmds: data.Commands{
+			data.Command("hello"),
+		},
+		Deps:   data.Dependencies{1, 0, 0, 8, 6},
+		Seq:    42,
+		Ballot: data.NewBallot(0, inst.id, inst.replica.Id),
+	}
+	//action, msg = inst.preAcceptedProcess(pa)
+}
+
 // **********************
 // *****  ACCEPTED ******
 // **********************

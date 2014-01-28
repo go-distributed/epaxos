@@ -142,7 +142,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// TODO: building
+// TODO: finish building, need testing
 func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preAccepted, accepted, committed)
 
@@ -156,6 +156,17 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
+
+	case *data.Accept:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectAccept()
+		}
+		return i.handleAccept(content)
+
+	case *data.Commit:
+		return i.handleCommit(content)
+	case *data.Prepare:
+		return i.handlePrepare(content)
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
@@ -184,6 +195,7 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
+		
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
