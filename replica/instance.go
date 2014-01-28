@@ -236,12 +236,7 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 // - Ballot: self (ballot)
 // - Ids
 func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) {
-	return replyAction, &data.PreAcceptReply{
-		Ok:         false,
-		ReplicaId:  i.replica.Id,
-		InstanceId: i.id,
-		Ballot:     i.ballot.GetCopy(),
-	}
+	return replyAction, i.makePreAcceptReply(false, 0, nil, i.ballot.GetCopy())
 }
 
 // rejectAccept rejects the Accept request with a AcceptReply:
@@ -286,6 +281,7 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	seq, deps := i.replica.findDependencies(p.Cmds)
 
 	i.cmds = p.Cmds.GetCopy()
+	i.seq = seq
 	i.deps = deps.GetCopy()
 	i.status = preAccepted
 	i.ballot = i.replica.MakeInitialBallot()
@@ -301,8 +297,26 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	}
 }
 
-func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg *data.PreAcceptReply) {
-	panic("")
+// When handling pre-accept, instance will set its ballot to newer one, and
+// update seq, deps if find any change.
+// Reply: pre-accept-OK if no change in deps; otherwise a normal pre-accept-reply.
+// The pre-accept-OK contains just one field. So we do it for network optimization
+func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message) {
+	i.ballot = p.Ballot
+	seq, deps, changed := i.replica.updateDependencies(p.Cmds, p.Seq, p.Deps, p.ReplicaId)
+
+	if changed {
+		i.seq, i.deps = seq, deps
+		return replyAction, i.makePreAcceptReply(true, seq, deps, nil)
+	}
+	// not initial leader
+	if p.Ballot.GetNumber() != 0 {
+		return replyAction, i.makePreAcceptReply(true, seq, deps, nil)
+	}
+	// pre-accept-ok for possible fast quorum commit
+	return replyAction, &data.PreAcceptOk{
+		InstanceId: i.id,
+	}
 }
 
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
@@ -363,3 +377,15 @@ func (i *Instance) checkStatus(statusList ...uint8) {
 // ****************************
 // ******* Make Message *******
 // ****************************
+
+func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencies,
+	ballot *data.Ballot) *data.PreAcceptReply {
+	return &data.PreAcceptReply{
+		Ok:         ok,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Seq:        seq,
+		Deps:       deps,
+		Ballot:     ballot,
+	}
+}

@@ -15,6 +15,7 @@ var _ = fmt.Printf
 // **** COMMON ROUTINE ******
 // **************************
 
+// !!! If it's not being used read only, please get a copy.
 func commonTestlibExampleCommands() data.Commands {
 	return data.Commands{
 		data.Command("hello"),
@@ -105,7 +106,6 @@ func TestNilStatusProcessPropose(t *testing.T) {
 	assert.Equal(t, i.info.preAcceptCount, 0)
 	assert.Equal(t, i.info.preAcceptNackCount, 0)
 	assert.True(t, i.info.isFastPath)
-
 }
 
 func TestNilStatusProcessPreAccept(t *testing.T) {
@@ -249,6 +249,10 @@ func TestRejections(t *testing.T) {
 		Ballot:     expectedBallot,
 	}))
 }
+
+// ******************************
+// ******* HANDLE MESSAGE *******
+// ******************************
 
 // It's testing `handleprepare` will return (replyaction, correct preparereply)
 // If we send prepare which sets `needcmdsinreply` true, it should return cmds in reply.
