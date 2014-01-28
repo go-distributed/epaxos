@@ -37,21 +37,25 @@ func instanceTestNilStatusProcessSetup() *Instance {
 // The instance should also be ready to receive pre-accept reply. That means the
 // relevant info should be set.
 func TestNilStatusProcessPropose(t *testing.T) {
-	// test panics
-	inst := instanceTestNilStatusProcessSetup()
-	inst.status = nilStatus
-	inst.seq = 1
-	assert.Panics(t, func() { inst.nilStatusProcess(&data.Propose{}) })
-
-	i := instanceTestNilStatusProcessSetup()
-	assert.Panics(t, func() { i.nilStatusProcess(&data.Propose{}) })
-
-	i.status = nilStatus
-	assert.Panics(t, func() { i.nilStatusProcess(&data.Prepare{}) })
-
 	p := &data.Propose{
 		Cmds: commonTestlibExampleCommands(),
 	}
+
+	inst := instanceTestNilStatusProcessSetup()
+	inst.status = nilStatus
+	inst.seq = 1
+	// test panics not freshly created nilStatus instance
+	assert.Panics(t, func() { inst.nilStatusProcess(p) })
+
+	// test panics instance's status is not nilStatus
+	i := instanceTestNilStatusProcessSetup()
+	assert.Panics(t, func() { i.nilStatusProcess(p) })
+
+	i.status = nilStatus
+
+	// test panics empty propose
+	assert.Panics(t, func() { i.nilStatusProcess(&data.Propose{}) })
+
 	action, m := i.nilStatusProcess(p)
 	if !assert.IsType(t, &data.PreAccept{}, m) {
 		t.Fatal("")
@@ -76,6 +80,7 @@ func TestNilStatusProcessPropose(t *testing.T) {
 	assert.Equal(t, i.info.preAcceptCount, 0)
 	assert.Equal(t, i.info.preAcceptNackCount, 0)
 	assert.True(t, i.info.isFastPath)
+
 }
 
 func TestNilStatusProcessPreAccept(t *testing.T) {
@@ -132,7 +137,7 @@ func TestCheckStatus(t *testing.T) {
 	assert.NotPanics(t, func() { i.checkStatus(committed) })
 }
 
-// TestRejections tests the whether rejection functions work correctly,
+// TestRejections tests whether rejection functions work correctly,
 // on success: we will get a bunch of replies with the field `Ok' == false,
 // `Ballot', `ReplicaId' and `InstanceId' should be the same of the instance
 // on failure: otherwise.
@@ -140,7 +145,7 @@ func TestRejections(t *testing.T) {
 	inst := instanceTestNilStatusProcessSetup()
 	inst.ballot = data.NewBallot(1, 2, inst.replica.Id)
 
-	// PreAcceptReply
+	// reject PreAcceptReply
 	action, msg := inst.rejectPreAccept()
 	pa := msg.(*data.PreAcceptReply)
 	assert.Equal(t, action, replyAction)
@@ -150,7 +155,7 @@ func TestRejections(t *testing.T) {
 	assert.Equal(t, pa.Ballot, inst.ballot)
 	assert.True(t, &pa.Ballot != &inst.ballot)
 
-	// AcceptReply
+	// reject AcceptReply
 	action, msg = inst.rejectAccept()
 	ar := msg.(*data.AcceptReply)
 	assert.Equal(t, action, replyAction)
@@ -160,7 +165,7 @@ func TestRejections(t *testing.T) {
 	assert.Equal(t, ar.Ballot, inst.ballot)
 	assert.True(t, &ar.Ballot != &inst.ballot)
 
-	// PrepareReply
+	// reject PrepareReply
 	action, msg = inst.rejectPrepare()
 	pr := msg.(*data.PrepareReply)
 	assert.Equal(t, action, replyAction)
@@ -169,4 +174,94 @@ func TestRejections(t *testing.T) {
 	assert.Equal(t, pr.InstanceId, inst.id)
 	assert.Equal(t, pr.Ballot, inst.ballot)
 	assert.True(t, &pr.Ballot != &inst.ballot)
+}
+
+// TestHandlePrepare tests whether we handle Prepares correctly.
+// on success: we will get a PrepareReply with appropriate fields
+// on failure: otherwise
+func TestHandlePrepare(t *testing.T) {
+	inst := instanceTestNilStatusProcessSetup()
+	ballot := data.NewBallot(1, 2, inst.replica.Id)
+	inst.ballot = ballot.GetCopy()
+	inst.status = committed
+	deps := data.Dependencies{
+		3,
+		4,
+		5,
+		6,
+		7,
+	}
+	inst.deps = deps.GetCopy()
+
+	// NeedCmdsInReply == false
+	largerBallot := data.NewBallot(2, 3, 3)
+	prepare := &data.Prepare{
+		ReplicaId:       3,
+		InstanceId:      4,
+		Ballot:          largerBallot,
+		NeedCmdsInReply: false,
+	}
+
+	action, msg := inst.handlePrepare(prepare)
+	pr := msg.(*data.PrepareReply)
+	assert.Equal(t, action, replyAction)
+
+	// test the reply
+	assert.Equal(t, pr, &data.PrepareReply{
+		Ok:         true,
+		ReplicaId:  0,
+		InstanceId: 1,
+		Status:     committed,
+		Cmds:       data.Commands(nil),
+		Deps:       deps,
+		Ballot:     prepare.Ballot,
+	})
+
+	assert.True(t, &pr.Deps != &inst.deps)
+	assert.True(t, &pr.Ballot != &inst.ballot)
+
+	assert.Equal(t, inst.ballot, prepare.Ballot)
+	assert.True(t, &inst.ballot != &prepare.Ballot)
+
+	// NeedCmdsInReply == true
+	prepare = &data.Prepare{
+		ReplicaId:       3,
+		InstanceId:      4,
+		Ballot:          data.NewBallot(2, 3, 3),
+		NeedCmdsInReply: true,
+	}
+	cmds := data.Commands{
+		data.Command("hello"),
+		data.Command("world"),
+	}
+	inst.cmds = cmds.GetCopy()
+
+	action, msg = inst.handlePrepare(prepare)
+	pr = msg.(*data.PrepareReply)
+	assert.Equal(t, action, replyAction)
+
+	// test the reply
+	assert.Equal(t, pr, &data.PrepareReply{
+		Ok:         true,
+		ReplicaId:  0,
+		InstanceId: 1,
+		Status:     committed,
+		Cmds:       cmds,
+		Deps:       deps,
+		Ballot:     prepare.Ballot,
+	})
+
+	assert.True(t, &pr.Deps != &inst.deps)
+	assert.True(t, &pr.Ballot != &inst.ballot)
+	assert.True(t, &pr.Cmds != &inst.cmds)
+
+	assert.Equal(t, inst.ballot, prepare.Ballot)
+	assert.True(t, &inst.ballot != &prepare.Ballot)
+}
+
+// TestHandleCommit tests the functionality of handleCommit
+// on success: handleCommit returns a no act and nil message,
+// besides, the instances' status is set to commited.
+// on failure: otherwise
+func TestHandleCommit(t *testing.T) {
 }

@@ -119,6 +119,7 @@ func (i *Instance) freshlyCreated() bool {
 // ****** State Processing ******
 // ******************************
 
+// TODO: building
 func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preAccepted)
 
@@ -137,6 +138,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
+// TODO: finishing building, need test
 func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(committed)
 
@@ -145,20 +147,21 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	}
 
 	switch content := m.Content().(type) {
-	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
-		// ignore delayed replies
-		return noAction, nil
 	case *data.PreAccept:
 		return i.rejectPreAccept()
 	case *data.Accept:
 		return i.rejectAccept()
 	case *data.Prepare:
 		return i.handlePrepare(content)
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
+		// ignore delayed replies
+		return noAction, nil
 	default:
 		panic("")
 	}
 }
 
+// TODO: building
 func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(accepted, committed)
 
@@ -171,9 +174,9 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 		// ignore delayed replies
 		return noAction, nil
 	case *data.PreAccept:
-		//return i.rejectPreAccept(content)
+		return i.rejectPreAccept()
 	case *data.Accept:
-		//return i.rejectAccept(content)
+		return i.rejectAccept()
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
@@ -182,11 +185,11 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 		}
 		return i.handlePrepare(content)
 	default:
-		panic("")
 	}
 	panic("")
 }
 
+// TODO: building
 func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preAccepted, accepted, committed)
 
@@ -195,12 +198,12 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	}
 
 	switch content := m.Content().(type) {
-	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
-		// ignore delayed replies
-		return noAction, nil
 	case *data.PreAccept:
 		_ = content
 		panic("")
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+		// ignore delayed replies
+		return noAction, nil
 	}
 	panic("")
 }
@@ -299,6 +302,7 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg Message) {
 	panic("")
 }
 
+// TODO: need testing
 func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 	if i.isAtOrAfterStatus(committed) {
 		panic("")
@@ -315,6 +319,7 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 	return
 }
 
+// handlePrepare handles Prepare messages
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg Message) {
 	i.ballot = p.Ballot
 
