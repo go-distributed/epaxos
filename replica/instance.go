@@ -48,12 +48,10 @@ type Instance struct {
 
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
-	preAcceptCount     int
-	isFastPath         bool
-
-	acceptCount     int
-
-	prepareCount     int
+	isFastPath     bool
+	preAcceptCount int
+	acceptCount    int
+	prepareCount   int
 }
 
 type RecoveryInfo struct {
@@ -111,6 +109,13 @@ func (i *Instance) freshlyCreated() bool {
 	return false
 }
 
+func (i *InstanceInfo) reset() {
+	i.isFastPath = true
+	i.preAcceptCount = 0
+	i.acceptCount = 0
+	i.prepareCount = 0
+}
+
 // ******************************
 // ****** State Processing ******
 // ******************************
@@ -134,6 +139,21 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
+	case *data.Accept:
+		if !i.freshlyCreated() && content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectAccept()
+		}
+		return i.handleAccept(content)
+	case *data.Commit:
+		return i.handleCommit(content)
+	case *data.PrepareReply:
+		if i.freshlyCreated() {
+			panic("")
+		}
+		return action, nil
+	case *data.PreAcceptReply, *data.AcceptReply:
+		panic("")
+
 	default:
 		panic("")
 	}
@@ -170,6 +190,7 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 			return noAction, nil
 		}
 		return i.handlePreAcceptReply(content)
+
 	case *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
@@ -178,7 +199,7 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// TODO: building
+// finish building, need testing
 func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(accepted, committed)
 
@@ -199,12 +220,19 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 		}
 		return i.handlePrepare(content)
 
-	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+	case *data.AcceptReply:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			// ignore stale PreAcceptReply
+			return noAction, nil
+		}
+		return i.handleAcceptReply(content)
+
+	case *data.PreAcceptReply, *data.PreAcceptOk, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
 	default:
+		panic("")
 	}
-	panic("")
 }
 
 // TODO: finishing building, need test
@@ -228,6 +256,11 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	default:
 		panic("")
 	}
+}
+
+// TODO: building
+func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
+	panic("")
 }
 
 // ******************************
@@ -322,21 +355,124 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	}
 }
 
-// handlePreAcceptReply() handles PreAcceptReplies,
+// handlePreAcceptReply handles PreAcceptReplies,
 // Update:
 // - ballot
-// - if ok=true, union seq, deps, and update counts
+// - if ok == true, union seq, deps, and update counts
+// - else only update ballot
 // Broadcast Action happens:
 // 1, if receiving >= fast quorum replies with same deps and seq,
 //    and the instance itself is initial leader,
 //    then broadcast Commit
 // 2, otherwise broadcast Accept
 func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, msg Message) {
-	panic("")
+	if p.Ballot.Compare(i.ballot) < 0 {
+		panic("")
+	}
+	if p.Ballot.Compare(i.ballot) > 0 && p.Ok {
+		panic("")
+	}
+
+	action, msg = noAction, nil
+
+	if p.Ballot.Compare(i.ballot) > 0 {
+		i.ballot = p.Ballot
+	}
+	if !p.Ok {
+		return
+	}
+
+	i.info.preAcceptCount++
+	if same := i.deps.Union(p.Deps); same {
+		// ignore the difference of deps between the sender and the receivers
+		if i.info.preAcceptCount > 1 {
+			i.info.isFastPath = false
+		}
+	}
+	if i.info.preAcceptCount >= int(i.replica.Size/2) && !i.info.isFastPath {
+		// slowpath
+		// TODO: persistent
+		i.status = accepted
+		i.info.reset() // clean preAcceptedCount
+		action, msg = broadcastAction, &data.Accept{
+			Cmds:       i.cmds.GetCopy(),
+			Seq:        i.seq,
+			Deps:       i.deps.GetCopy(),
+			ReplicaId:  i.replica.Id,
+			InstanceId: i.id,
+			Ballot:     i.ballot.GetCopy(),
+		}
+	} else if i.info.preAcceptCount == int(i.replica.Size-2) && !i.info.isFastPath {
+		// fastpath
+		// TODO: persistent
+		i.status = committed
+		i.info.reset() // clean preAcceptedCount
+		action, msg = broadcastAction, &data.Commit{
+			Cmds:       i.cmds.GetCopy(),
+			Seq:        i.seq,
+			Deps:       i.deps.GetCopy(),
+			ReplicaId:  i.replica.Id,
+			InstanceId: i.id,
+		}
+	}
+	return
 }
 
+// handleAccept handles Accept messages,
+// Update:
+// - cmds, seq, ballot
+// action: reply an AcceptReply message, with:
+// - Ok = true
+// - everything else = instance's fields
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
-	panic("")
+	i.cmds, i.seq, i.ballot = a.Cmds, a.Seq, a.Ballot
+
+	msg = &data.AcceptReply{
+		Ok:         true,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Ballot:     i.ballot.GetCopy(),
+	}
+	action = replyAction
+	return
+}
+
+// handleAcceptReply handles AcceptReplies as sender,
+// Update:
+// - ballot
+// Broadcast event happens when:
+// if receiving majority replies with ok == true,
+//    then broadcast Commit
+// otherwise: do nothing.
+func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg Message) {
+	if a.Ballot.Compare(i.ballot) < 0 {
+		panic("")
+	}
+
+	// negative reply
+	if i.ballot.Compare(a.Ballot) < 0 {
+		if a.Ok {
+			panic("")
+		}
+		i.ballot = a.Ballot
+		return noAction, nil
+	}
+
+	if !a.Ok {
+		panic("")
+	}
+
+	i.info.acceptCount++
+	if i.info.acceptCount >= int(i.replica.Size/2) {
+		return broadcastAction, &data.Commit{
+			Cmds:       i.cmds.GetCopy(),
+			Seq:        i.seq,
+			Deps:       i.deps.GetCopy(),
+			ReplicaId:  i.replica.Id,
+			InstanceId: i.id,
+		}
+	}
+	return noAction, nil
 }
 
 // TODO: need testing
@@ -345,8 +481,7 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 		panic("")
 	}
 
-	i.cmds = c.Cmds
-	i.deps = c.Deps
+	i.cmds, i.seq, i.deps = c.Cmds, c.Seq, c.Deps
 	i.status = committed
 
 	// TODO: Do we need to clear unnecessary objects to save more memory?
@@ -363,7 +498,6 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 	}
 
 	i.ballot = p.Ballot
-
 	return replyAction, &data.PrepareReply{
 		Ok:         true,
 		ReplicaId:  i.replica.Id,

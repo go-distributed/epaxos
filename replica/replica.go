@@ -20,6 +20,7 @@ const (
 	noAction uint8 = iota + 1
 	replyAction
 	fastQuorumAction
+	majoritySendAction
 	broadcastAction
 )
 
