@@ -48,12 +48,10 @@ type Instance struct {
 
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
-	preAcceptCount int
 	isFastPath     bool
-
-	acceptCount int
-
-	prepareCount int
+	preAcceptCount int
+	acceptCount    int
+	prepareCount   int
 }
 
 type RecoveryInfo struct {
@@ -134,6 +132,21 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
+	case *data.Accept:
+		if !i.freshlyCreated() && content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectAccept()
+		}
+		return i.handleAccept(content)
+	case *data.Commit:
+		return i.handleCommit(content)
+	case *data.PrepareReply:
+		if i.freshlyCreated() {
+			panic("")
+		}
+		return action, nil
+	case *data.PreAcceptReply, *data.AcceptReply:
+		panic("")
+
 	default:
 		panic("")
 	}
@@ -239,7 +252,7 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 }
 
 // TODO: building
-func (i *Instance) prepareProcess(m Message) (action uint8, msg Message) {
+func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 	panic("")
 }
 
@@ -369,23 +382,34 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 	return
 }
 
-// handleAcceptReply() handles AcceptReplies,
+// handleAcceptReply() handles AcceptReplies as sender,
 // Update:
 // - ballot
+// Broadcast event happens:
 // 1, if receiving majority replies with ok == true,
-// then broadcast Commit
+//    then broadcast Commit
 // 2, otherwise: do nothing.
-func (i *Instance) handleAcceptReply(p *data.AcceptReply) (action uint8, msg Message) {
-	i.ballot = p.Ballot
-	if p.Ok {
-		i.info.acceptCount++
+func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg Message) {
+	if a.Ballot.Compare(i.ballot) < 0 {
+		panic("")
 	}
 
-	action = noAction
-	msg = nil
+	// negative reply
+	if i.ballot.Compare(a.Ballot) < 0 {
+		if a.Ok {
+			panic("")
+		}
+		i.ballot = a.Ballot
+		return noAction, nil
+	}
+
+	if !a.Ok {
+		panic("")
+	}
+
+	i.info.acceptCount++
 	if i.info.acceptCount >= int(i.replica.Size/2) {
-		action = replyAction
-		msg = &data.Commit{
+		return broadcastAction, &data.Commit{
 			Cmds:       i.cmds.GetCopy(),
 			Seq:        i.seq,
 			Deps:       i.deps.GetCopy(),
@@ -393,7 +417,7 @@ func (i *Instance) handleAcceptReply(p *data.AcceptReply) (action uint8, msg Mes
 			InstanceId: i.id,
 		}
 	}
-	return broadcastAction, nil
+	return noAction, nil
 }
 
 // TODO: need testing
@@ -402,8 +426,7 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 		panic("")
 	}
 
-	i.cmds = c.Cmds
-	i.deps = c.Deps
+	i.cmds, i.seq, i.deps = c.Cmds, c.Seq, c.Deps
 	i.status = committed
 
 	// TODO: Do we need to clear unnecessary objects to save more memory?
@@ -419,8 +442,7 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		cmds = i.cmds.GetCopy()
 	}
 
-	i.ballot = p.Ballot
-
+        i.ballot = p.Ballot
 	return replyAction, &data.PrepareReply{
 		Ok:         true,
 		ReplicaId:  i.replica.Id,
