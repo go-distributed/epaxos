@@ -14,7 +14,6 @@ type AcceptReply struct {
 	ReplicaId  uint8
 	InstanceId uint64
 	Ballot     *Ballot
-	Status     uint8
 }
 
 func (a *Accept) Type() uint8 {

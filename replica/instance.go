@@ -48,12 +48,12 @@ type Instance struct {
 
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
-	preAcceptCount     int
-	isFastPath         bool
+	preAcceptCount int
+	isFastPath     bool
 
-	acceptCount     int
+	acceptCount int
 
-	prepareCount     int
+	prepareCount int
 }
 
 type RecoveryInfo struct {
@@ -348,16 +348,53 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 	panic("")
 }
 
+// handleAccept handles Accept messages,
+// Update:
+// - cmds, seq, ballot
+// action: reply an AcceptReply message, with:
+// - Ok = true
+// - everything else = instance's fields
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
-	panic("")
+	i.cmds = a.Cmds
+	i.seq = a.Seq
+	i.ballot = a.Ballot
+
+	msg = &data.AcceptReply{
+		Ok:         true,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Ballot:     i.ballot.GetCopy(),
+	}
+	action = replyAction
+	return
 }
 
 // handleAcceptReply() handles AcceptReplies,
+// Update:
+// - ballot
 // 1, if receiving majority replies with ok == true,
 // then broadcast Commit
 // 2, otherwise: do nothing.
 func (i *Instance) handleAcceptReply(p *data.AcceptReply) (action uint8, msg Message) {
-	panic("")
+	action = noAction
+	msg = nil
+
+	i.ballot = p.Ballot
+	if p.Ok {
+		i.info.acceptCount++
+	}
+
+	if i.info.acceptCount >= int(i.replica.Size/2) {
+		action = replyAction
+		msg = &data.Commit{
+			Cmds:       i.cmds.GetCopy(),
+			Seq:        i.seq,
+			Deps:       i.deps.GetCopy(),
+			ReplicaId:  i.replica.Id,
+			InstanceId: i.id,
+		}
+	}
+	return action, msg
 }
 
 // TODO: need testing
