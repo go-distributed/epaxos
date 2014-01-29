@@ -48,12 +48,10 @@ type Instance struct {
 
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
-	preAcceptCount int
 	isFastPath     bool
-
-	acceptCount int
-
-	prepareCount int
+	preAcceptCount int
+	acceptCount    int
+	prepareCount   int
 }
 
 type RecoveryInfo struct {
@@ -111,6 +109,13 @@ func (i *Instance) freshlyCreated() bool {
 	return false
 }
 
+func (i *InstanceInfo) reset() {
+	i.isFastPath = true
+	i.preAcceptCount = 0
+	i.acceptCount = 0
+	i.prepareCount = 0
+}
+
 // ******************************
 // ****** State Processing ******
 // ******************************
@@ -134,6 +139,21 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
+	case *data.Accept:
+		if !i.freshlyCreated() && content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectAccept()
+		}
+		return i.handleAccept(content)
+	case *data.Commit:
+		return i.handleCommit(content)
+	case *data.PrepareReply:
+		if i.freshlyCreated() {
+			panic("")
+		}
+		return action, nil
+	case *data.PreAcceptReply, *data.AcceptReply:
+		panic("")
+
 	default:
 		panic("")
 	}
@@ -239,7 +259,7 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 }
 
 // TODO: building
-func (i *Instance) prepareProcess(m Message) (action uint8, msg Message) {
+func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 	panic("")
 }
 
@@ -335,17 +355,67 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	}
 }
 
-// handlePreAcceptReply() handles PreAcceptReplies,
+// handlePreAcceptReply handles PreAcceptReplies,
 // Update:
 // - ballot
-// - if ok=true, union seq, deps, and update counts
+// - if ok == true, union seq, deps, and update counts
+// - else only update ballot
 // Broadcast Action happens:
 // 1, if receiving >= fast quorum replies with same deps and seq,
 //    and the instance itself is initial leader,
 //    then broadcast Commit
 // 2, otherwise broadcast Accept
 func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, msg Message) {
-	panic("")
+	if p.Ballot.Compare(i.ballot) < 0 {
+		panic("")
+	}
+	if p.Ballot.Compare(i.ballot) > 0 && p.Ok {
+		panic("")
+	}
+
+	action, msg = noAction, nil
+
+	if p.Ballot.Compare(i.ballot) > 0 {
+		i.ballot = p.Ballot
+	}
+	if !p.Ok {
+		return
+	}
+
+	i.info.preAcceptCount++
+	if same := i.deps.Union(p.Deps); same {
+		// ignore the difference of deps between the sender and the receivers
+		if i.info.preAcceptCount > 1 {
+			i.info.isFastPath = false
+		}
+	}
+	if i.info.preAcceptCount >= int(i.replica.Size/2) && !i.info.isFastPath {
+		// slowpath
+		// TODO: persistent
+		i.status = accepted
+		i.info.reset() // clean preAcceptedCount
+		action, msg = broadcastAction, &data.Accept{
+			Cmds:       i.cmds.GetCopy(),
+			Seq:        i.seq,
+			Deps:       i.deps.GetCopy(),
+			ReplicaId:  i.replica.Id,
+			InstanceId: i.id,
+			Ballot:     i.ballot.GetCopy(),
+		}
+	} else if i.info.preAcceptCount == int(i.replica.Size-2) && !i.info.isFastPath {
+		// fastpath
+		// TODO: persistent
+		i.status = committed
+		i.info.reset() // clean preAcceptedCount
+		action, msg = broadcastAction, &data.Commit{
+			Cmds:       i.cmds.GetCopy(),
+			Seq:        i.seq,
+			Deps:       i.deps.GetCopy(),
+			ReplicaId:  i.replica.Id,
+			InstanceId: i.id,
+		}
+	}
+	return
 }
 
 // handleAccept handles Accept messages,
@@ -355,9 +425,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 // - Ok = true
 // - everything else = instance's fields
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
-	i.cmds = a.Cmds
-	i.seq = a.Seq
-	i.ballot = a.Ballot
+	i.cmds, i.seq, i.ballot = a.Cmds, a.Seq, a.Ballot
 
 	msg = &data.AcceptReply{
 		Ok:         true,
@@ -369,24 +437,34 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 	return
 }
 
-// handleAcceptReply() handles AcceptReplies,
+// handleAcceptReply handles AcceptReplies as sender,
 // Update:
 // - ballot
-// 1, if receiving majority replies with ok == true,
-// then broadcast Commit
-// 2, otherwise: do nothing.
-func (i *Instance) handleAcceptReply(p *data.AcceptReply) (action uint8, msg Message) {
-	action = noAction
-	msg = nil
-
-	i.ballot = p.Ballot
-	if p.Ok {
-		i.info.acceptCount++
+// Broadcast event happens when:
+// if receiving majority replies with ok == true,
+//    then broadcast Commit
+// otherwise: do nothing.
+func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg Message) {
+	if a.Ballot.Compare(i.ballot) < 0 {
+		panic("")
 	}
 
+	// negative reply
+	if i.ballot.Compare(a.Ballot) < 0 {
+		if a.Ok {
+			panic("")
+		}
+		i.ballot = a.Ballot
+		return noAction, nil
+	}
+
+	if !a.Ok {
+		panic("")
+	}
+
+	i.info.acceptCount++
 	if i.info.acceptCount >= int(i.replica.Size/2) {
-		action = replyAction
-		msg = &data.Commit{
+		return broadcastAction, &data.Commit{
 			Cmds:       i.cmds.GetCopy(),
 			Seq:        i.seq,
 			Deps:       i.deps.GetCopy(),
@@ -394,7 +472,7 @@ func (i *Instance) handleAcceptReply(p *data.AcceptReply) (action uint8, msg Mes
 			InstanceId: i.id,
 		}
 	}
-	return action, msg
+	return noAction, nil
 }
 
 // TODO: need testing
@@ -403,8 +481,7 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 		panic("")
 	}
 
-	i.cmds = c.Cmds
-	i.deps = c.Deps
+	i.cmds, i.seq, i.deps = c.Cmds, c.Seq, c.Deps
 	i.status = committed
 
 	// TODO: Do we need to clear unnecessary objects to save more memory?
@@ -421,7 +498,6 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 	}
 
 	i.ballot = p.Ballot
-
 	return replyAction, &data.PrepareReply{
 		Ok:         true,
 		ReplicaId:  i.replica.Id,

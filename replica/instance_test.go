@@ -154,7 +154,7 @@ func TestPreAcceptedProcessPreAccept(t *testing.T) {
 		Ok:         false,
 		ReplicaId:  inst.replica.Id,
 		InstanceId: inst.id,
-		Ballot:     inst.ballot,
+		Ballot:     instanceBallot,
 	})
 
 	expectedSeq := uint32(42)
