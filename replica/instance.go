@@ -191,7 +191,13 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 		}
 		return i.handlePreAcceptReply(content)
 
-	case *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply:
+	case *data.PreAcceptOk:
+		if content.Ballot.Compare(i.ballot) < 0 {
+			// ignore stale PreAcceptOk
+			return noAction, nil
+		}
+		return i.handlePreAcceptOk(content)
+	case *data.AcceptReply, *data.PrepareReply:
 		// ignore delayed replies
 		return noAction, nil
 	default:
@@ -211,7 +217,11 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 	case *data.PreAccept:
 		return i.rejectPreAccept()
 	case *data.Accept:
-		return i.rejectAccept()
+		if content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectAccept()
+		}
+		return i.handleAccept(content)
+
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
@@ -338,6 +348,10 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 // Reply: pre-accept-OK if no change in deps; otherwise a normal pre-accept-reply.
 // The pre-accept-OK contains just one field. So we do it for network optimization
 func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message) {
+	if p.Ballot.Compare(i.ballot) < 0 {
+		panic("")
+	}
+
 	i.ballot = p.Ballot
 	seq, deps, changed := i.replica.updateDependencies(p.Cmds, p.Seq, p.Deps, p.ReplicaId)
 
@@ -355,46 +369,32 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	}
 }
 
-// handlePreAcceptReply handles PreAcceptReplies,
-// Update:
-// - ballot
-// - if ok == true, union seq, deps, and update counts
-// - else only update ballot
-// Broadcast Action happens:
-// 1, if receiving >= fast quorum replies with same deps and seq,
-//    and the instance itself is initial leader,
-//    then broadcast Commit
-// 2, otherwise broadcast Accept
-func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, msg Message) {
-	if p.Ballot.Compare(i.ballot) < 0 {
-		panic("")
-	}
-	if p.Ballot.Compare(i.ballot) > 0 && p.Ok {
+// handlePreAcceptOk handles PreAcceptOks,
+// one replica will receive PreAcceptOks only if it's the initial leader,
+// on receiving this message,
+// it will increase the preAcceptCount, and do broadcasts if:
+// - the preAcceptCount >= the size of fast quorum, and all replies are
+// the same, then it will broadcast Commits,
+// - the preAcceptCount >= N/2(not including the sender), and not all replies are equal,
+// then it will broadcast Accepts,
+// - otherwise, do nothing
+func (i *Instance) handlePreAcceptOk(p *data.PreAcceptOk) (action uint8, msg Message) {
+	if p.Ballot.Compare(i.ballot) != 0 {
+		// shouldn't call this func if ballot is smaller(which means it's stale)
+		// also ballot shouldn't be larger if someone replies preAcceptOk
 		panic("")
 	}
 
 	action, msg = noAction, nil
-
-	if p.Ballot.Compare(i.ballot) > 0 {
-		i.ballot = p.Ballot
-	}
-	if !p.Ok {
-		return
-	}
-
 	i.info.preAcceptCount++
-	if same := i.deps.Union(p.Deps); same {
-		// ignore the difference of deps between the sender and the receivers
-		if i.info.preAcceptCount > 1 {
-			i.info.isFastPath = false
-		}
-	}
+
 	if i.info.preAcceptCount >= int(i.replica.Size/2) && !i.info.isFastPath {
 		// slowpath
 		// TODO: persistent
 		i.status = accepted
 		i.info.reset() // clean preAcceptedCount
-		action, msg = broadcastAction, &data.Accept{
+		action = broadcastAction
+		msg = &data.Accept{
 			Cmds:       i.cmds.GetCopy(),
 			Seq:        i.seq,
 			Deps:       i.deps.GetCopy(),
@@ -407,7 +407,79 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		// TODO: persistent
 		i.status = committed
 		i.info.reset() // clean preAcceptedCount
-		action, msg = broadcastAction, &data.Commit{
+		action = broadcastAction
+		msg = &data.Commit{
+			Cmds:       i.cmds.GetCopy(),
+			Seq:        i.seq,
+			Deps:       i.deps.GetCopy(),
+			ReplicaId:  i.replica.Id,
+			InstanceId: i.id,
+		}
+	}
+	return
+}
+
+// handlePreAcceptReply handles PreAcceptReplies,
+// Update:
+// - ballot
+// - if ok == true, union seq, deps, and update counts
+// - else only update ballot
+// Broadcast Action happens if:
+// - receiving >= fast quorum replies with same deps and seq,
+//    and the instance itself is initial leader,
+//    then broadcast Commit
+// - receiving >= N/2 replies (not including the sender), but not all replies are equal,
+// then it will broadcast Accepts,
+//
+// - Otherwise do nothing.
+func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, msg Message) {
+	if p.Ballot.Compare(i.ballot) < 0 {
+		panic("")
+	}
+	if p.Ballot.Compare(i.ballot) > 0 && p.Ok {
+		panic("")
+	}
+
+	action, msg = noAction, nil
+
+	// TODO: invalid fastPath if the ballot is not initial ballot
+	if p.Ballot.Compare(i.ballot) > 0 { // we are old fashioned, need to update our knowledge
+		i.ballot = p.Ballot
+	}
+	if !p.Ok {
+		return
+	}
+
+	i.info.preAcceptCount++
+	if same := i.deps.Union(p.Deps); !same {
+		// ignore the difference of deps between the sender and the receivers
+		if i.info.preAcceptCount > 1 {
+			i.info.isFastPath = false
+		}
+	}
+	if i.info.preAcceptCount >= int(i.replica.Size/2) && !i.info.isFastPath {
+		// slowpath
+		// TODO: persistent
+		i.status = accepted
+		i.info.reset() // clean preAcceptedCount
+
+		action = broadcastAction
+		msg = &data.Accept{
+			Cmds:       i.cmds.GetCopy(),
+			Seq:        i.seq,
+			Deps:       i.deps.GetCopy(),
+			ReplicaId:  i.replica.Id,
+			InstanceId: i.id,
+			Ballot:     i.ballot.GetCopy(),
+		}
+	} else if i.info.preAcceptCount == int(i.replica.Size-2) && !i.info.isFastPath {
+		// fastpath
+		// TODO: persistent
+		i.status = committed
+		i.info.reset() // clean preAcceptedCount
+
+		action = broadcastAction
+		msg = &data.Commit{
 			Cmds:       i.cmds.GetCopy(),
 			Seq:        i.seq,
 			Deps:       i.deps.GetCopy(),
@@ -425,6 +497,10 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 // - Ok = true
 // - everything else = instance's fields
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
+	if a.Ballot.Compare(i.ballot) < 0 {
+		panic("") // should get here
+	}
+
 	i.cmds, i.seq, i.ballot = a.Cmds, a.Seq, a.Ballot
 
 	msg = &data.AcceptReply{

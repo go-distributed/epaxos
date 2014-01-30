@@ -11,6 +11,7 @@ type PreAccept struct {
 
 type PreAcceptOk struct {
 	InstanceId uint64
+	Ballot     *Ballot
 }
 
 type PreAcceptReply struct {
