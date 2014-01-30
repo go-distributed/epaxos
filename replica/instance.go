@@ -73,6 +73,7 @@ func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
 	i = &Instance{
 		replica: replica,
 		id:      instanceId,
+		deps:    replica.makeInitialDeps(),
 	}
 	return i
 }
@@ -120,9 +121,17 @@ func (i *InstanceInfo) reset() {
 // ****** State Processing ******
 // ******************************
 
-// TODO: building
+// NilStatus exists for:
+// - the instance is newly created when
+// - - received a proposal first time and only once. (sender)
+// - - received pre-accept, accept, commit, prepare the first time. (receiver)
+// - - required by commit dependencies and transitioning to preparing. (sender)
+// - the instance is not newly created when
+// - - after reverted back from `preparing`. (sender -> receiver), received pre-accept,
+// - -   accept, commit, prepare, prepare reply.
+// - - received prepare and waiting for further message. (receiver)
 func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
-	defer i.checkStatus(preAccepted)
+	defer i.checkStatus(preAccepted, accepted, committed, preparing)
 
 	if !i.isAtStatus(nilStatus) {
 		panic("")
@@ -146,20 +155,23 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.Prepare:
+		return i.handlePrepare(content)
 	case *data.PrepareReply:
 		if i.freshlyCreated() {
-			panic("")
+			panic("Never send prepare before but receive prepare reply")
 		}
 		return action, nil
-	case *data.PreAcceptReply, *data.AcceptReply:
+	case *data.PreAcceptReply, *data.AcceptReply, *data.PreAcceptOk:
 		panic("")
-
 	default:
 		panic("")
 	}
 }
 
-// TODO: finish building, need testing
+// preAccepted instance can be of two stands:
+// - as a sender
+// - as a receiver
 func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preAccepted, accepted, committed)
 
@@ -173,7 +185,6 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
-
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectAccept()
@@ -199,7 +210,9 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// finish building, need testing
+// accepted instance can be of two stands:
+// - as a sender
+// - as a receiver
 func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(accepted, committed)
 
@@ -320,7 +333,7 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	i.seq = seq
 	i.deps = deps.GetCopy()
 	i.status = preAccepted
-	i.ballot = i.replica.MakeInitialBallot()
+	i.ballot = i.replica.makeInitialBallot()
 	i.info = NewInstanceInfo()
 
 	return fastQuorumAction, &data.PreAccept{
@@ -329,7 +342,7 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 		Cmds:       p.Cmds.GetCopy(),
 		Seq:        seq,
 		Deps:       deps.GetCopy(),
-		Ballot:     i.replica.MakeInitialBallot(),
+		Ballot:     i.ballot.GetCopy(),
 	}
 }
 
@@ -338,6 +351,7 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 // Reply: pre-accept-OK if no change in deps; otherwise a normal pre-accept-reply.
 // The pre-accept-OK contains just one field. So we do it for network optimization
 func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message) {
+	i.cmds = p.Cmds
 	i.ballot = p.Ballot
 	seq, deps, changed := i.replica.updateDependencies(p.Cmds, p.Seq, p.Deps, p.ReplicaId)
 
@@ -418,23 +432,27 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 	return
 }
 
-// handleAccept handles Accept messages,
+// handleAccept handles Accept messages (receiver)
 // Update:
 // - cmds, seq, ballot
 // action: reply an AcceptReply message, with:
 // - Ok = true
 // - everything else = instance's fields
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
-	i.cmds, i.seq, i.ballot = a.Cmds, a.Seq, a.Ballot
+	if i.isAtOrAfterStatus(accepted) {
+		panic("")
+	}
 
-	msg = &data.AcceptReply{
+	i.cmds, i.seq, i.ballot = a.Cmds, a.Seq, a.Ballot
+	// Accept ballot >= self ballot,
+	i.status = accepted
+
+	return replyAction, &data.AcceptReply{
 		Ok:         true,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
 		Ballot:     i.ballot.GetCopy(),
 	}
-	action = replyAction
-	return
 }
 
 // handleAcceptReply handles AcceptReplies as sender,
@@ -464,6 +482,8 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg Mes
 
 	i.info.acceptCount++
 	if i.info.acceptCount >= int(i.replica.Size/2) {
+		i.status = committed
+		i.info.reset()
 		return broadcastAction, &data.Commit{
 			Cmds:       i.cmds.GetCopy(),
 			Seq:        i.seq,
@@ -489,23 +509,30 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 	return noAction, nil
 }
 
-// handlePrepare handles Prepare messages
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
 	var cmds data.Commands
+
 	cmds = nil
 	if p.NeedCmdsInReply {
 		cmds = i.cmds.GetCopy()
 	}
 
+	fromInitialLeader := false
+	if i.ballot.IsInitialBallot() {
+		fromInitialLeader = true
+	}
+
 	i.ballot = p.Ballot
 	return replyAction, &data.PrepareReply{
-		Ok:         true,
-		ReplicaId:  i.replica.Id,
-		InstanceId: i.id,
-		Status:     i.status,
-		Cmds:       cmds,
-		Deps:       i.deps.GetCopy(),
-		Ballot:     i.ballot.GetCopy(),
+		Ok:                true,
+		ReplicaId:         i.replica.Id,
+		InstanceId:        i.id,
+		Status:            i.status,
+		Seq:               i.seq,
+		Cmds:              cmds,
+		Deps:              i.deps.GetCopy(),
+		Ballot:            i.ballot.GetCopy(),
+		FromInitialLeader: fromInitialLeader,
 	}
 }
 
