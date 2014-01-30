@@ -512,6 +512,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
 	if a.Ballot.Compare(i.ballot) < 0 {
 		panic("") // shouldn't get here
+	}
 	if i.isAtOrAfterStatus(accepted) {
 		panic("")
 	}

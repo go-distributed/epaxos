@@ -300,13 +300,14 @@ func TestHandlePrepare(t *testing.T) {
 
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, reply, &data.PrepareReply{
-		Ok:         true,
-		ReplicaId:  0,
-		InstanceId: 1,
-		Status:     committed,
-		Cmds:       nil,
-		Deps:       i.deps.GetCopy(),
-		Ballot:     prepare.Ballot,
+		Ok:                true,
+		ReplicaId:         0,
+		InstanceId:        1,
+		Status:            committed,
+		Cmds:              nil,
+		Deps:              i.deps.GetCopy(),
+		Ballot:            prepare.Ballot,
+		FromInitialLeader: true,
 	})
 
 	// NeedCmdsInReply == true
