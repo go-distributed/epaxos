@@ -21,7 +21,6 @@ type PreAcceptReply struct {
 	Seq          uint32
 	Deps         Dependencies
 	Ballot       *Ballot
-	originalCmds bool
 }
 
 func (p *PreAccept) Type() uint8 {

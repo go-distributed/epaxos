@@ -313,6 +313,7 @@ func TestHandlePrepare(t *testing.T) {
 	// NeedCmdsInReply == true
 	prepare.NeedCmdsInReply = true
 	i.cmds = commonTestlibExampleCommands()
+	i.ballot = i.replica.makeInitialBallot()
 
 	action, reply = i.handlePrepare(prepare)
 	assert.Equal(t, action, replyAction)
