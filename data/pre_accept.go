@@ -11,15 +11,17 @@ type PreAccept struct {
 
 type PreAcceptOk struct {
 	InstanceId uint64
+	Ballot     *Ballot
 }
 
 type PreAcceptReply struct {
-	Ok         bool
-	ReplicaId  uint8
-	InstanceId uint64
-	Seq        uint32
-	Deps       Dependencies
-	Ballot     *Ballot
+	Ok           bool
+	ReplicaId    uint8
+	InstanceId   uint64
+	Seq          uint32
+	Deps         Dependencies
+	Ballot       *Ballot
+	originalCmds bool
 }
 
 func (p *PreAccept) Type() uint8 {
