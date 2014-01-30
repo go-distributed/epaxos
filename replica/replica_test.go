@@ -31,7 +31,7 @@ func TestNewReplica(t *testing.T) {
 func TestMakeInitialBallot(t *testing.T) {
 	r := New(3, 5, new(test.DummySM))
 	r.Epoch = 3
-	b := r.MakeInitialBallot()
+	b := r.makeInitialBallot()
 	assert.Equal(t, b, data.NewBallot(3, 0, 3))
 }
 

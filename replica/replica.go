@@ -58,8 +58,12 @@ func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 	return r
 }
 
-func (r *Replica) MakeInitialBallot() *data.Ballot {
+func (r *Replica) makeInitialBallot() *data.Ballot {
 	return data.NewBallot(r.Epoch, 0, r.Id)
+}
+
+func (r *Replica) makeInitialDeps() data.Dependencies {
+	return make(data.Dependencies, r.Size)
 }
 
 // ***********************

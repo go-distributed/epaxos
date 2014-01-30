@@ -8,13 +8,15 @@ type Prepare struct {
 }
 
 type PrepareReply struct {
-	Ok         bool
-	ReplicaId  uint8
-	InstanceId uint64
-	Status     uint8
-	Cmds       Commands
-	Deps       Dependencies
-	Ballot     *Ballot
+	Ok                bool
+	ReplicaId         uint8
+	InstanceId        uint64
+	Status            uint8
+	Seq               uint32
+	Cmds              Commands
+	Deps              Dependencies
+	Ballot            *Ballot
+	FromInitialLeader bool // this field is used for preAccepted reply
 }
 
 func (p *Prepare) Type() uint8 {
