@@ -53,7 +53,6 @@ type InstanceInfo struct {
 	isFastPath     bool
 	preAcceptCount int
 	acceptCount    int
-	prepareCount   int
 }
 
 type RecoveryInfo struct {
@@ -120,7 +119,6 @@ func (i *InstanceInfo) reset() {
 	i.isFastPath = true
 	i.preAcceptCount = 0
 	i.acceptCount = 0
-	i.prepareCount = 0
 }
 
 // ******************************
@@ -221,6 +219,9 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	case *data.AcceptReply:
 		panic("")
 	case *data.PrepareReply:
+		if i.ballot.IsInitialBallot() {
+			panic("")
+		}
 		return noAction, nil
 	default:
 		panic("")
@@ -257,8 +258,12 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 			return noAction, nil // ignore stale PreAcceptReply
 		}
 		return i.handleAcceptReply(content)
-
-	case *data.PreAcceptReply, *data.PreAcceptOk, *data.PrepareReply:
+	case *data.PreAcceptReply, *data.PreAcceptOk:
+		return noAction, nil // ignore stale replies
+	case *data.PrepareReply:
+		if i.ballot.IsInitialBallot() {
+			panic("")
+		}
 		return noAction, nil // ignore stale replies
 	default:
 		panic("")
@@ -402,12 +407,13 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	}
 	seq, deps := i.replica.findDependencies(p.Cmds)
 
-	i.cmds = p.Cmds.GetCopy()
+	i.cmds = p.Cmds
 	i.seq = seq
-	i.deps = deps.GetCopy()
-	i.status = preAccepted
+	i.deps = deps
 	i.ballot = i.replica.makeInitialBallot()
 	i.info = NewInstanceInfo()
+
+	i.enterPreAccepted()
 
 	return fastQuorumAction, &data.PreAccept{
 		ReplicaId:  i.replica.Id,
@@ -497,8 +503,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 
 	if i.info.preAcceptCount == i.replica.fastQuorum() && i.ableToFastPath() {
 		// TODO: persistent
-		i.status = committed
-		i.info.reset() // clean preAcceptedCount
+		i.enterCommitted()
 
 		return broadcastAction, &data.Commit{
 			Cmds:       i.cmds.GetCopy(),
@@ -509,8 +514,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		}
 	} else if i.info.preAcceptCount >= int(i.replica.Size/2) && !i.ableToFastPath() {
 		// TODO: persistent
-		i.status = accepted
-		i.info.reset() // clean preAcceptedCount
+		i.enterAccepted()
 
 		return broadcastAction, &data.Accept{
 			Cmds:       i.cmds.GetCopy(),
@@ -532,7 +536,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 // - everything else = instance's fields
 func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptReply) {
 	if a.Ballot.Compare(i.ballot) < 0 {
-		panic("") // shouldn't get here
+		panic("")
 	}
 	if i.isAfterStatus(accepted) ||
 		i.isAtStatus(accepted) && a.Ballot.Compare(i.ballot) == 0 {
@@ -540,7 +544,7 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 	}
 
 	i.cmds, i.seq, i.ballot = a.Cmds, a.Seq, a.Ballot
-	i.status = accepted
+	i.enterAccepted()
 
 	return replyAction, &data.AcceptReply{
 		Ok:         true,
@@ -577,8 +581,7 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 
 	i.info.acceptCount++
 	if i.info.acceptCount >= int(i.replica.Size/2) {
-		i.status = committed
-		i.info.reset()
+		i.enterCommitted()
 		return broadcastAction, &data.Commit{
 			Cmds:       i.cmds.GetCopy(),
 			Seq:        i.seq,
@@ -597,7 +600,7 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 	}
 
 	i.cmds, i.seq, i.deps = c.Cmds, c.Seq, c.Deps
-	i.status = committed
+	i.enterCommitted()
 
 	// TODO: Do we need to clear unnecessary objects to save more memory?
 	// TODO: persistent
@@ -605,7 +608,7 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
-	panic("TODO: revert to early status")
+	//panic("TODO: revert to early status")
 	if p.Ballot.Compare(i.ballot) <= 0 { // cannot be equal or smaller
 		str := fmt.Sprint(p.Ballot, i.ballot)
 		panic(str)
@@ -672,21 +675,26 @@ func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencie
 }
 
 // *******************************
-// ******* Enter New State *******
+// ******* State Transition ******
 // *******************************
 
 func (i *Instance) enterNilStatus() {
-	panic("")
 }
+
 func (i *Instance) enterPreAccepted() {
-	panic("")
+	i.checkStatus(nilStatus, preAccepted, preparing)
+	i.status = preAccepted
+	i.info.reset()
 }
 
 func (i *Instance) enterAccepted() {
-	panic("")
+	i.checkStatus(nilStatus, preAccepted, preparing, accepted)
+	i.status = accepted
+	i.info.reset()
 }
 func (i *Instance) enterCommitted() {
-	panic("")
+	i.checkStatus(nilStatus, preAccepted, preparing, accepted)
+	i.status = committed
 }
 func (i *Instance) enterPreparing() {
 	panic("")
