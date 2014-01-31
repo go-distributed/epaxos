@@ -58,6 +58,16 @@ func commonTestlibExampleExecutedInstance() *Instance {
 	return i
 }
 
+func TestNewInstance(t *testing.T) {
+	expectedReplicaId := uint8(0)
+	expectedInstanceId := uint64(1)
+	r := New(expectedReplicaId, 5, new(test.DummySM))
+	i := NewInstance(r, expectedInstanceId)
+	assert.Equal(t, i.replica.Id, expectedReplicaId)
+	assert.Equal(t, i.id, expectedInstanceId)
+	assert.Equal(t, i.deps, i.replica.makeInitialDeps())
+}
+
 // ************************
 // ****** Nil Status ******
 // ************************
@@ -73,7 +83,7 @@ func TestNilStatusProcessPropose(t *testing.T) {
 	}
 
 	instWithBallot := commonTestlibExampleNilStatusInstance()
-	instWithBallot.ballot = instWithBallot.replica.MakeInitialBallot()
+	instWithBallot.ballot = instWithBallot.replica.makeInitialBallot()
 	// test panics not freshly created nilStatus instance
 	assert.Panics(t, func() { instWithBallot.nilStatusProcess(p) })
 
@@ -100,7 +110,7 @@ func TestNilStatusProcessPropose(t *testing.T) {
 		Cmds:       commonTestlibExampleCommands(),
 		Seq:        0,
 		Deps:       i.deps,
-		Ballot:     i.replica.MakeInitialBallot(),
+		Ballot:     i.replica.makeInitialBallot(),
 	}))
 
 	assert.Equal(t, i.info.preAcceptCount, 0)
@@ -154,7 +164,7 @@ func TestPreAcceptedProcessPreAccept(t *testing.T) {
 		Ok:         false,
 		ReplicaId:  inst.replica.Id,
 		InstanceId: inst.id,
-		Ballot:     inst.ballot,
+		Ballot:     instanceBallot,
 	})
 
 	expectedSeq := uint32(42)
@@ -273,7 +283,7 @@ func TestRejections(t *testing.T) {
 // If we send prepare which sets `needcmdsinreply` true, it should return cmds in reply.
 func TestHandlePrepare(t *testing.T) {
 	i := commonTestlibExampleCommittedInstance()
-	i.ballot = i.replica.MakeInitialBallot()
+	i.ballot = i.replica.makeInitialBallot()
 	i.deps = data.Dependencies{3, 4, 5, 6, 7}
 
 	largerBallot := i.ballot.GetIncNumCopy()
@@ -290,18 +300,20 @@ func TestHandlePrepare(t *testing.T) {
 
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, reply, &data.PrepareReply{
-		Ok:         true,
-		ReplicaId:  0,
-		InstanceId: 1,
-		Status:     committed,
-		Cmds:       nil,
-		Deps:       i.deps.GetCopy(),
-		Ballot:     prepare.Ballot,
+		Ok:                true,
+		ReplicaId:         0,
+		InstanceId:        1,
+		Status:            committed,
+		Cmds:              nil,
+		Deps:              i.deps.GetCopy(),
+		Ballot:            prepare.Ballot,
+		FromInitialLeader: true,
 	})
 
 	// NeedCmdsInReply == true
 	prepare.NeedCmdsInReply = true
 	i.cmds = commonTestlibExampleCommands()
+	i.ballot = i.replica.makeInitialBallot()
 
 	action, reply = i.handlePrepare(prepare)
 	assert.Equal(t, action, replyAction)

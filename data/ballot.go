@@ -85,6 +85,10 @@ func (b *Ballot) GetIncNumCopy() *Ballot {
 	}
 }
 
+func (b *Ballot) IsInitialBallot() bool {
+	return b.number == 0
+}
+
 func (b *Ballot) GetCopy() *Ballot {
 	return &Ballot{
 		b.epoch,
