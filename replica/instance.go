@@ -4,6 +4,8 @@ package replica
 // @assumption:
 // - When a replica pass in the message to instance methods, we assume that the
 //    internal fields of message is readable only and safe to reference to.
+// @decision (01/31/14):
+// - Status has precedence. An accepted instance won't handle pre-accept even if it carries larger ballot.
 
 import (
 	"fmt"
@@ -160,20 +162,15 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
-		if i.freshlyCreated() {
-			panic("") // shouldn't receive any prepare
-		}
 		if !i.freshlyCreated() && content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
-
 	case *data.PrepareReply:
 		if i.freshlyCreated() {
 			panic("Never send prepare before but receive prepare reply")
 		}
 		return action, nil
-
 	case *data.PreAcceptReply, *data.AcceptReply, *data.PreAcceptOk:
 		panic("")
 	default:
@@ -197,13 +194,11 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
-
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
-
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
@@ -218,16 +213,14 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 			return noAction, nil
 		}
 		return i.handlePreAcceptReply(content)
-
 	case *data.PreAcceptOk:
-		if content.Ballot.Compare(i.ballot) < 0 {
-			// ignore stale PreAcceptOk
-			return noAction, nil
+		if !i.ballot.IsInitialBallot() {
+			return noAction, nil // ignore stale reply
 		}
 		return i.handlePreAcceptOk(content)
-
-	case *data.AcceptReply, *data.PrepareReply:
-		// ignore delayed replies
+	case *data.AcceptReply:
+		panic("")
+	case *data.PrepareReply:
 		return noAction, nil
 	default:
 		panic("")
@@ -252,7 +245,6 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
-
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
@@ -260,17 +252,14 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
-
 	case *data.AcceptReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			// ignore stale PreAcceptReply
-			return noAction, nil
+			return noAction, nil // ignore stale PreAcceptReply
 		}
 		return i.handleAcceptReply(content)
 
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.PrepareReply:
-		// ignore delayed replies
-		return noAction, nil
+		return noAction, nil // ignore stale replies
 	default:
 		panic("")
 	}
@@ -290,10 +279,13 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	case *data.Accept:
 		return i.rejectAccept()
 	case *data.Prepare:
+		// This is very time consuming. We can optimize it by setting all committed instance's ballots to minimum.
+		if content.Ballot.Compare(i.ballot) < 0 {
+			return i.rejectPrepare()
+		}
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
-		// ignore delayed replies
-		return noAction, nil
+		return noAction, nil // ignore stale replies
 	default:
 		panic("")
 	}
@@ -303,7 +295,7 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preparing, preAccepted, accepted, committed)
 
-	if !i.isAtStatus(preparing) {
+	if !i.isAtStatus(preparing) || i.recoveryInfo == nil {
 		panic("")
 	}
 
@@ -319,7 +311,6 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
-
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
@@ -329,8 +320,6 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
 		}
-
-		// TODO: revert to early status
 		return i.handlePrepare(content)
 
 	case *data.PrepareReply:
@@ -338,8 +327,20 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			return noAction, nil
 		}
 		return i.handlePrepareReply(content)
-
-	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply:
+	case *data.PreAcceptReply:
+		if i.recoveryInfo.formerStatus < preAccepted {
+			panic("")
+		}
+		return noAction, nil
+	case *data.PreAcceptOk:
+		if i.recoveryInfo.formerStatus < preAccepted {
+			panic("")
+		}
+		return noAction, nil
+	case *data.AcceptReply:
+		if i.recoveryInfo.formerStatus < accepted {
+			panic("")
+		}
 		// ignore delayed replies
 		return noAction, nil
 	default:
@@ -479,6 +480,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		if p.Ok {
 			panic("")
 		}
+		i.ballot = p.Ballot
 		i.info.reset() // sender -> receiver
 		return noAction, nil
 	}
@@ -603,6 +605,7 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
+	panic("TODO: revert to early status")
 	if p.Ballot.Compare(i.ballot) <= 0 { // cannot be equal or smaller
 		str := fmt.Sprint(p.Ballot, i.ballot)
 		panic(str)
@@ -666,4 +669,25 @@ func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencie
 		Deps:       deps,
 		Ballot:     i.ballot.GetCopy(),
 	}
+}
+
+// *******************************
+// ******* Enter New State *******
+// *******************************
+
+func (i *Instance) enterNilStatus() {
+	panic("")
+}
+func (i *Instance) enterPreAccepted() {
+	panic("")
+}
+
+func (i *Instance) enterAccepted() {
+	panic("")
+}
+func (i *Instance) enterCommitted() {
+	panic("")
+}
+func (i *Instance) enterPreparing() {
+	panic("")
 }
