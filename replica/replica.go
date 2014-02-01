@@ -20,6 +20,7 @@ const (
 	noAction uint8 = iota + 1
 	replyAction
 	fastQuorumAction
+	majoritySendAction
 	broadcastAction
 )
 
@@ -57,8 +58,19 @@ func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 	return r
 }
 
-func (r *Replica) MakeInitialBallot() *data.Ballot {
+func (r *Replica) fastQuorum() int {
+	if r.Size < 2 {
+		panic("")
+	}
+	return int(r.Size - 2)
+}
+
+func (r *Replica) makeInitialBallot() *data.Ballot {
 	return data.NewBallot(r.Epoch, 0, r.Id)
+}
+
+func (r *Replica) makeInitialDeps() data.Dependencies {
+	return make(data.Dependencies, r.Size)
 }
 
 // ***********************
@@ -70,6 +82,7 @@ func (r *Replica) MakeInitialBallot() *data.Ballot {
 // It returns (seq, cmds)
 // seq = 1 + max{i.seq, where haveconflicts(i.cmds, cmds)} || 0
 // cmds = most recent interference instance for each instance space
+// TODO: This should be atomic operation in perspective of individual instance.
 func (r *Replica) findDependencies(cmds data.Commands) (uint32, data.Dependencies) {
 	deps := make(data.Dependencies, r.Size)
 	seq := uint32(0)
@@ -85,7 +98,6 @@ func (r *Replica) findDependencies(cmds data.Commands) (uint32, data.Dependencie
 			}
 		}
 	}
-
 	return seq, deps
 }
 
