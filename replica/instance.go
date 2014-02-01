@@ -508,6 +508,11 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		panic("")
 	}
 	if p.Ballot.Compare(i.ballot) > 0 {
+
+		// [*] there may be stale but large ballots,
+		// if we receive such ballots, that means there may be another newer proposer,
+		// so we'd better step down by increasing our own ballot so we can ignore
+		// the following replies.
 		if p.Ok {
 			panic("")
 		}
@@ -592,6 +597,11 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 
 	// negative reply
 	if i.ballot.Compare(a.Ballot) < 0 {
+
+		// [*] there may be stale but large ballots,
+		// if we receive such ballots, that means there may be another newer proposer,
+		// so we'd better step down by increasing our own ballot so we can ignore
+		// the following replies.
 		if a.Ok {
 			panic("")
 		}
