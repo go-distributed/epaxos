@@ -26,7 +26,7 @@ func (d Dependencies) Union(other Dependencies) bool {
 
 func (d Dependencies) GetCopy() Dependencies {
 	if d == nil {
-		return nil
+		panic("")
 	}
 	deps := make(Dependencies, len(d))
 	copy(deps, d)

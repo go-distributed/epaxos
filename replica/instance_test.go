@@ -39,6 +39,7 @@ func commonTestlibExampleInstance() *Instance {
 	}
 
 	i.seq = 42
+	i.initRecoveryInfo()
 	return i
 }
 
@@ -626,7 +627,7 @@ func TestCommittedProccessWithPanic(t *testing.T) {
 // }
 func TestRejections(t *testing.T) {
 	inst := commonTestlibExampleInstance()
-	expectedBallot := data.NewBallot(1, 2, inst.replica.Id)
+	expectedBallot := data.NewBallot(2, 2, inst.replica.Id)
 	inst.ballot = expectedBallot.GetCopy()
 
 	// reject with PreAcceptReply
