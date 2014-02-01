@@ -1,5 +1,10 @@
 package replica
 
+// This file implements replica module.
+// @decision (02/01/14):
+// - Replica Epoch starts from 1. 0 is reserved for fresly created instance.
+// - Now freshly created instance always has the minimum ballot.
+
 import (
 	"fmt"
 
@@ -47,7 +52,7 @@ func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 		MaxInstanceNum: make([]uint64, size),
 		InstanceMatrix: make([][]*Instance, size),
 		StateMachine:   sm,
-		Epoch:          0,
+		Epoch:          1,
 	}
 
 	for i := uint8(0); i < size; i++ {
