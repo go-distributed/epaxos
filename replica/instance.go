@@ -76,9 +76,11 @@ type RecoveryInfo struct {
 
 func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
 	i = &Instance{
-		replica: replica,
-		id:      instanceId,
-		deps:    replica.makeInitialDeps(),
+		replica:      replica,
+		id:           instanceId,
+		deps:         replica.makeInitialDeps(),
+		info:         NewInstanceInfo(),
+		recoveryInfo: NewRecoveryInfo(),
 	}
 	return i
 }
@@ -123,6 +125,21 @@ func (i *InstanceInfo) reset() {
 	i.isFastPath = true
 	i.preAcceptCount = 0
 	i.acceptCount = 0
+}
+
+func (i *Instance) initRecoveryInfo() {
+	i.recoveryInfo.replyCount = 0
+	i.recoveryInfo.maxAcceptedBallot = i.ballot
+	i.recoveryInfo.cmds = i.cmds
+	i.recoveryInfo.deps = i.deps
+	i.recoveryInfo.status = i.status
+	i.recoveryInfo.formerStatus = i.status
+	// preacceptcount is used to count N/2 identical initial preaccepts.
+	if i.isAtStatus(preAccepted) {
+		i.recoveryInfo.preAcceptedCount = 0
+	} else {
+		i.recoveryInfo.preAcceptedCount = 1
+	}
 }
 
 // ******************************
@@ -323,6 +340,8 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
+		// the instance itself is the first one to have ballot of this
+		// magnitude. It can't receive others having the same
 		if content.Ballot.Compare(i.ballot) == 0 {
 			panic("")
 		}
@@ -418,7 +437,6 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	i.seq = seq
 	i.deps = deps
 	i.ballot = i.replica.makeInitialBallot()
-	i.info = NewInstanceInfo()
 
 	i.enterPreAccepted()
 
@@ -494,7 +512,6 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 			panic("")
 		}
 		i.ballot = p.Ballot
-		i.info.reset() // sender -> receiver
 		return noAction, nil
 	}
 
@@ -508,7 +525,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		}
 	}
 
-	if i.info.preAcceptCount == i.replica.fastQuorum() && i.ableToFastPath() {
+	if i.info.preAcceptCount >= i.replica.fastQuorum() && i.ableToFastPath() {
 		// TODO: persistent
 		i.enterCommitted()
 
@@ -615,7 +632,8 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 }
 
 func (i *Instance) revertPrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
-	panic("")
+	i.status = i.recoveryInfo.formerStatus
+	return i.handlePrepare(p)
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
@@ -695,6 +713,9 @@ func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencie
 // *******************************
 
 func (i *Instance) enterNilStatus() {
+}
+
+func (i *Instance) enterPreAcceptedAsSender() {
 }
 
 func (i *Instance) enterPreAccepted() {
