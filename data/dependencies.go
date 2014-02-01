@@ -3,6 +3,7 @@ package data
 type Dependencies []uint64
 
 // union unions the deps into the receiver
+// return true if deps are same
 func (d Dependencies) Union(other Dependencies) bool {
 	if d == nil || other == nil {
 		panic("Union: dependencis should not be nil")
