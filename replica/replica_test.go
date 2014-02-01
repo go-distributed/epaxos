@@ -19,7 +19,7 @@ func TestNewReplica(t *testing.T) {
 	assert.True(t, len(r.MaxInstanceNum) == 5)
 	assert.True(t, len(r.InstanceMatrix) == 5)
 	assert.Equal(t, r.StateMachine, new(test.DummySM))
-	assert.True(t, r.Epoch == 0)
+	assert.True(t, r.Epoch == 1)
 
 	for i := range r.InstanceMatrix {
 		assert.True(t, len(r.InstanceMatrix[i]) == defaultInstancesLength)
