@@ -5,7 +5,11 @@ package replica
 // - When a replica pass in the message to instance methods, we assume that the
 //    internal fields of message is readable only and safe to reference to.
 // @decision (01/31/14):
-// - Status has precedence. An accepted instance won't handle pre-accept even if it carries larger ballot.
+// - Status has precedence. An accepted instance won't handle pre-accept even if
+// - the pre-accept carries larger ballot.
+// @decision (02/01/14):
+// - Executed won't be included in instance statuses anymore.
+// - Executed will be recorded in a flag. This will simplify the state machine.
 
 import (
 	"fmt"
@@ -26,7 +30,6 @@ const (
 	preAccepted
 	accepted
 	committed
-	executed
 )
 
 // ****************************
@@ -44,8 +47,9 @@ type Instance struct {
 	recoveryInfo *RecoveryInfo
 
 	// local information
-	replica *Replica
-	id      uint64
+	replica  *Replica
+	id       uint64
+	executed bool
 }
 
 // bookkeeping struct for recording counts of different messages and some flags
@@ -270,7 +274,10 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// TODO: finishing building, need test
+// committed instance will
+// - reject all request messages (pre-accept, accept),
+// - handle prepare to help it find committed,
+// - ignore others
 func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(committed)
 
@@ -284,10 +291,6 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	case *data.Accept:
 		return i.rejectAccept()
 	case *data.Prepare:
-		// This is very time consuming. We can optimize it by setting all committed instance's ballots to minimum.
-		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare()
-		}
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
 		return noAction, nil // ignore stale replies
@@ -296,7 +299,8 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// TODO: building
+// preparing instance could only acts as a sender
+//
 func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preparing, preAccepted, accepted, committed)
 
@@ -325,7 +329,7 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
 		}
-		return i.handlePrepare(content)
+		return i.revertPrepare(content)
 
 	case *data.PrepareReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
@@ -357,6 +361,12 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 // ****** Reject Messages *******
 // ******************************
 
+// -------- REJECT CONDITIONS --------
+// When someone rejected a message (pre-accept, accept, prepare), it implied that
+// the rejector had larger ballot than the message sent. In such a case, we just need
+// to return {ok: false, rejector's ballot, and relevant ids}
+// -----------------------------------
+
 // PreAccept reply:
 // - ok : false
 // - Ballot: self (ballot)
@@ -372,7 +382,6 @@ func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) 
 // - InstanceId: self.id
 // - other fields: undefined
 func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
-	// TODO: assert contition holds
 	return replyAction, &data.AcceptReply{
 		Ok:         false,
 		ReplicaId:  i.replica.Id,
@@ -386,13 +395,11 @@ func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
 // - Ballot: self (ballot)
 // - relevant Ids
 func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
-	// TODO: refactor
 	return replyAction, &data.PrepareReply{
 		Ok:         false,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
 		Ballot:     i.ballot.GetCopy(),
-		Status:     i.status, //unnecessary, but it doesn't hurt
 	}
 }
 
@@ -607,15 +614,25 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 	return noAction, nil
 }
 
+func (i *Instance) revertPrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
+	panic("")
+}
+
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
-	//panic("TODO: revert to early status")
-	if p.Ballot.Compare(i.ballot) <= 0 { // cannot be equal or smaller
-		str := fmt.Sprint(p.Ballot, i.ballot)
-		panic(str)
+	// We optimize the case of committed instance in
+	// - reply as a ok=true message
+	// - reply with the message ballot so that
+	// - - sender could recognize it as correct and corresponding reply.
+	if !i.isAtStatus(committed) {
+		if p.Ballot.Compare(i.ballot) <= 0 { // cannot be equal or smaller
+			panic(fmt.Sprintln("prepare ballot: ", p.Ballot, i.ballot))
+		}
+		i.ballot = p.Ballot
 	}
 
 	cmds := data.Commands(nil)
-
+	// if the preparing instance know the commands (i.e. it has been told
+	// beforehand), we won't bother to serialize it over the network.
 	if p.NeedCmdsInReply {
 		cmds = i.cmds.GetCopy()
 	}
@@ -625,7 +642,6 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		fromInitialLeader = true
 	}
 
-	i.ballot = p.Ballot
 	return replyAction, &data.PrepareReply{
 		Ok:                true,
 		ReplicaId:         i.replica.Id,
@@ -634,7 +650,7 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		Seq:               i.seq,
 		Cmds:              cmds,
 		Deps:              i.deps.GetCopy(),
-		Ballot:            i.ballot.GetCopy(),
+		Ballot:            p.Ballot.GetCopy(),
 		FromInitialLeader: fromInitialLeader,
 	}
 }

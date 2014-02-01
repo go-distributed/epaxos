@@ -15,7 +15,6 @@ var _ = fmt.Printf
 // **** COMMON ROUTINE ******
 // **************************
 
-// !!! If it's not being used read only, please get a copy.
 func commonTestlibExampleCommands() data.Commands {
 	return data.Commands{
 		data.Command("hello"),
@@ -24,7 +23,9 @@ func commonTestlibExampleCommands() data.Commands {
 
 func commonTestlibExampleInstance() *Instance {
 	r := New(0, 5, new(test.DummySM))
-	return NewInstance(r, conflictNotFound+1)
+	i := NewInstance(r, conflictNotFound+1)
+	i.cmds = commonTestlibExampleCommands()
+	return i
 }
 
 func commonTestlibExampleNilStatusInstance() *Instance {
@@ -53,12 +54,6 @@ func commonTestlibExampleCommittedInstance() *Instance {
 func commonTestlibExamplePreParingInstance() *Instance {
 	i := commonTestlibExampleInstance()
 	i.status = preparing
-	i.ballot = i.replica.makeInitialBallot()
-	return i
-}
-func commonTestlibExampleExecutedInstance() *Instance {
-	i := commonTestlibExampleInstance()
-	i.status = executed
 	i.ballot = i.replica.makeInitialBallot()
 	return i
 }
@@ -224,6 +219,7 @@ func TestCommittedProcessWithNoAction(t *testing.T) {
 	assert.Nil(t, m)
 }
 
+// If a committed instance receives accept, it will reject it.
 func TestCommittedProcessWithRejcetAccept(t *testing.T) {
 	// create a committed instance
 	inst := commonTestlibExampleCommittedInstance()
@@ -243,34 +239,9 @@ func TestCommittedProcessWithRejcetAccept(t *testing.T) {
 	})
 }
 
-func TestCommittedProcessWithRejectPrepare(t *testing.T) {
-	// create a committed instance
-	inst := commonTestlibExampleCommittedInstance()
-
-	// create small and large ballots
-	smallBallot := inst.replica.makeInitialBallot()
-	largeBallot := smallBallot.GetIncNumCopy()
-
-	inst.ballot = largeBallot
-
-	// send a Prepare message to it
-	p := &data.Prepare{
-		Ballot: smallBallot,
-	}
-	action, m := inst.committedProcess(p)
-	// expect:
-	// - action: replyAction
-	// - message: AcceptReply with ok == false, ballot == largeBallot
-	assert.Equal(t, action, replyAction)
-	assert.Equal(t, m, &data.PrepareReply{
-		Ok:         false,
-		ReplicaId:  inst.replica.Id,
-		InstanceId: inst.id,
-		Ballot:     largeBallot,
-		Status:     committed,
-	})
-}
-
+// if a committed instance receives prepare with
+// - larger ballot, reply ok = true with large ballot
+// - smaller ballot, reply ok = true with small ballot
 func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 	// create a committed instance
 	inst := commonTestlibExampleCommittedInstance()
@@ -279,29 +250,43 @@ func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 	smallBallot := inst.replica.makeInitialBallot()
 	largeBallot := smallBallot.GetIncNumCopy()
 
-	inst.ballot = smallBallot
-
 	// send a Prepare message to it
 	p := &data.Prepare{
-		Ballot: largeBallot,
+		Ballot:          largeBallot,
+		NeedCmdsInReply: true,
 	}
-	action, m := inst.committedProcess(p)
+	expectedReply := &data.PrepareReply{
+		Ok:         true,
+		ReplicaId:  inst.replica.Id,
+		InstanceId: inst.id,
+		Status:     committed,
+		Cmds:       inst.cmds,
+		Deps:       inst.deps,
+	}
+
 	// expect:
 	// - action: replyAction
-	// - message: AcceptReply with ok == false, ballot == largeBallot
+	// - message: AcceptReply with ok == true, ballot == message ballot
+
+	// handle larger ballot
+	action, m := inst.committedProcess(p)
 	assert.Equal(t, action, replyAction)
-	assert.Equal(t, m, &data.PrepareReply{
-		Ok:                true,
-		ReplicaId:         inst.replica.Id,
-		InstanceId:        inst.id,
-		Ballot:            largeBallot,
-		Status:            committed,
-		Cmds:              inst.cmds,
-		Deps:              inst.deps,
-		FromInitialLeader: true,
-	})
+
+	expectedReply.Ballot = largeBallot.GetCopy()
+	expectedReply.FromInitialLeader = true
+	assert.Equal(t, m, expectedReply)
+
+	// handle smaller ballot
+	inst.ballot = largeBallot
+	p.Ballot = smallBallot
+	_, m = inst.committedProcess(p)
+
+	expectedReply.Ballot = smallBallot.GetCopy()
+	expectedReply.FromInitialLeader = false
+	assert.Equal(t, m, expectedReply)
 }
 
+// committed instance should reject pre-accept
 func TestCommittedProcessWithRejectPreAccept(t *testing.T) {
 	// create a committed instance
 	inst := commonTestlibExampleCommittedInstance()
@@ -395,7 +380,7 @@ func TestRejections(t *testing.T) {
 // ******* HANDLE MESSAGE *******
 // ******************************
 
-// It's testing `handleprepare` will return (replyaction, correct preparereply)
+// It's testing `handleprepare` will return (replyaction, correct prepare-reply)
 // If we send prepare which sets `needcmdsinreply` true, it should return cmds in reply.
 func TestHandlePrepare(t *testing.T) {
 	i := commonTestlibExampleCommittedInstance()
@@ -452,6 +437,6 @@ func TestCheckStatus(t *testing.T) {
 		status: committed,
 	}
 
-	assert.Panics(t, func() { i.checkStatus(preAccepted, accepted, preparing, executed) })
+	assert.Panics(t, func() { i.checkStatus(preAccepted, accepted, preparing) })
 	assert.NotPanics(t, func() { i.checkStatus(committed) })
 }
