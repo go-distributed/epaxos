@@ -34,8 +34,8 @@ How Instance State Transition
 - *preparing*: timeout in sending accept, dependency required
 
 *preparing* to
-- *preAccepted*: (<= N/2 preAccepted), all noop, receive preAccept
-- *accepted*: (> N/2 preAccepted), (accepted in prepare reply), receive accept
+- *preAccepted*: (prepare reply case 2), all noop, receive preAccept
+- *accepted*: (prepare reply case 1), (accepted in prepare reply), (all prepare reply of noop) receive accept
 - *committed*: (committed in prepare reply), receive commit
 - *preparing*: timeout in sending prepare
 
@@ -56,8 +56,8 @@ Transition conditions:
 - *all noop*, happens when all prepare replies of no-op commands.
 - *majority agree*, happens when >= N/2 replica agree on the message you sent.
 - *receive < XXX >*, happens when receiving message of < XXX > type and ballot of message is larger than local one (except commit).
-
-
+- *prepare reply case 1*, happens when receiving N/2 + 1 prepare replies and >= N/2 are identical non-leader with default ballot (from leader).
+- *prepare reply case 2*, not above case 1, but have preAccepted in reply.
 
 Nil Status Explained
 ------

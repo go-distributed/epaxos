@@ -52,3 +52,9 @@ func TestDependenciesGetCopy(t *testing.T) {
 	assert.True(t, &self != &other)
 	assert.Equal(t, self, other)
 }
+
+func TestDependenciesNilPanic(t *testing.T) {
+	var d Dependencies
+	d = nil
+	assert.Panics(t, func() { d.GetCopy() })
+}

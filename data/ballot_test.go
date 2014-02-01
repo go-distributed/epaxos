@@ -111,3 +111,13 @@ func TestBallotGetCopy(t *testing.T) {
 	assert.True(t, &b != &c)
 	assert.Equal(t, b, c)
 }
+
+func TestBallotGetEpoch(t *testing.T) {
+	b := NewBallot(2, 33, 4)
+	assert.Equal(t, b.GetEpoch(), uint8(2))
+}
+
+func TestBallotIsInitialBallot(t *testing.T) {
+	b := NewBallot(2, 0, 3)
+	assert.True(t, b.IsInitialBallot())
+}
