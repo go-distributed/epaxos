@@ -129,7 +129,7 @@ func (i *InstanceInfo) reset() {
 
 func (i *Instance) initRecoveryInfo() {
 	i.recoveryInfo.replyCount = 0
-	i.recoveryInfo.maxAcceptedBallot = i.ballot
+	i.recoveryInfo.maxAcceptedBallot = i.ballot.GetCopy()
 	i.recoveryInfo.cmds = i.cmds
 	i.recoveryInfo.deps = i.deps
 	i.recoveryInfo.status = i.status
@@ -438,7 +438,7 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	i.deps = deps
 	i.ballot = i.replica.makeInitialBallot()
 
-	i.enterPreAccepted()
+	i.enterPreAcceptedAsSender()
 
 	return fastQuorumAction, &data.PreAccept{
 		ReplicaId:  i.replica.Id,
@@ -453,12 +453,13 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 // When handling pre-accept, instance will set its ballot to newer one, and
 // update seq, deps if find any change.
 // Reply: pre-accept-OK if no change in deps; otherwise a normal pre-accept-reply.
-// The pre-accept-OK contains just one field. So we do it for network optimization
+// The pre-accept-OK contains just one field, which is a serilization optimization.
 func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message) {
 	if p.Ballot.Compare(i.ballot) < 0 {
 		panic("")
 	}
 
+	i.enterPreAcceptedAsReceiver()
 	i.cmds, i.ballot = p.Cmds, p.Ballot
 	seq, deps, changed := i.replica.updateDependencies(p.Cmds, p.Seq, p.Deps, p.ReplicaId)
 
@@ -637,6 +638,7 @@ func (i *Instance) revertPrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
+	oldBallot := i.ballot.GetCopy()
 	// We optimize the case of committed instance in
 	// - reply as a ok=true message
 	// - reply with the message ballot so that
@@ -655,21 +657,16 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		cmds = i.cmds.GetCopy()
 	}
 
-	fromInitialLeader := false
-	if i.ballot.IsInitialBallot() {
-		fromInitialLeader = true
-	}
-
 	return replyAction, &data.PrepareReply{
-		Ok:                true,
-		ReplicaId:         i.replica.Id,
-		InstanceId:        i.id,
-		Status:            i.status,
-		Seq:               i.seq,
-		Cmds:              cmds,
-		Deps:              i.deps.GetCopy(),
-		Ballot:            p.Ballot.GetCopy(),
-		FromInitialLeader: fromInitialLeader,
+		Ok:             true,
+		ReplicaId:      i.replica.Id,
+		InstanceId:     i.id,
+		Status:         i.status,
+		Seq:            i.seq,
+		Cmds:           cmds,
+		Deps:           i.deps.GetCopy(),
+		Ballot:         p.Ballot.GetCopy(),
+		OriginalBallot: oldBallot,
 	}
 }
 
@@ -716,6 +713,20 @@ func (i *Instance) enterNilStatus() {
 }
 
 func (i *Instance) enterPreAcceptedAsSender() {
+	i.checkStatus(nilStatus, preparing)
+	i.status = preAccepted
+	i.info.reset()
+}
+
+func (i *Instance) enterPreAcceptedAsReceiver() {
+	i.checkStatus(nilStatus, preparing, preAccepted)
+	i.status = preAccepted
+}
+
+func (i *Instance) enterAcceptedAsSender() {
+}
+
+func (i *Instance) enterAcceptedAsReceiver() {
 }
 
 func (i *Instance) enterPreAccepted() {

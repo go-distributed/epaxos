@@ -247,14 +247,10 @@ func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 	inst := commonTestlibExampleCommittedInstance()
 
 	// create small and large ballots
-	smallBallot := inst.replica.makeInitialBallot()
-	largeBallot := smallBallot.GetIncNumCopy()
+	smallerBallot := inst.replica.makeInitialBallot()
+	largerBallot := smallerBallot.GetIncNumCopy()
 
 	// send a Prepare message to it
-	p := &data.Prepare{
-		Ballot:          largeBallot,
-		NeedCmdsInReply: true,
-	}
 	expectedReply := &data.PrepareReply{
 		Ok:         true,
 		ReplicaId:  inst.replica.Id,
@@ -263,26 +259,31 @@ func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 		Cmds:       inst.cmds,
 		Deps:       inst.deps,
 	}
+	p := &data.Prepare{
+		NeedCmdsInReply: true,
+	}
 
 	// expect:
 	// - action: replyAction
 	// - message: AcceptReply with ok == true, ballot == message ballot
 
 	// handle larger ballot
+	p.Ballot = largerBallot
+	inst.ballot = smallerBallot
+	expectedReply.Ballot = largerBallot
+	expectedReply.OriginalBallot = inst.ballot
+
 	action, m := inst.committedProcess(p)
 	assert.Equal(t, action, replyAction)
-
-	expectedReply.Ballot = largeBallot.GetCopy()
-	expectedReply.FromInitialLeader = true
 	assert.Equal(t, m, expectedReply)
 
 	// handle smaller ballot
-	inst.ballot = largeBallot
-	p.Ballot = smallBallot
-	_, m = inst.committedProcess(p)
+	p.Ballot = smallerBallot
+	inst.ballot = largerBallot
+	expectedReply.Ballot = smallerBallot.GetCopy()
+	expectedReply.OriginalBallot = inst.ballot
 
-	expectedReply.Ballot = smallBallot.GetCopy()
-	expectedReply.FromInitialLeader = false
+	_, m = inst.committedProcess(p)
 	assert.Equal(t, m, expectedReply)
 }
 
@@ -383,11 +384,12 @@ func TestRejections(t *testing.T) {
 // It's testing `handleprepare` will return (replyaction, correct prepare-reply)
 // If we send prepare which sets `needcmdsinreply` true, it should return cmds in reply.
 func TestHandlePrepare(t *testing.T) {
-	i := commonTestlibExampleCommittedInstance()
-	i.ballot = i.replica.makeInitialBallot()
-	i.deps = data.Dependencies{3, 4, 5, 6, 7}
+	i := commonTestlibExamplePreAcceptedInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.GetIncNumCopy()
 
-	largerBallot := i.ballot.GetIncNumCopy()
+	i.ballot = smallerBallot
+	i.deps = data.Dependencies{3, 4, 5, 6, 7}
 
 	// NeedCmdsInReply == false
 	prepare := &data.Prepare{
@@ -400,15 +402,18 @@ func TestHandlePrepare(t *testing.T) {
 	action, reply := i.handlePrepare(prepare)
 
 	assert.Equal(t, action, replyAction)
+	// it should return {
+	//   ok = true, correct status, deps, ballots
+	// }
 	assert.Equal(t, reply, &data.PrepareReply{
-		Ok:                true,
-		ReplicaId:         0,
-		InstanceId:        1,
-		Status:            committed,
-		Cmds:              nil,
-		Deps:              i.deps.GetCopy(),
-		Ballot:            prepare.Ballot,
-		FromInitialLeader: true,
+		Ok:             true,
+		Cmds:           nil,
+		Status:         preAccepted,
+		Deps:           i.deps.GetCopy(),
+		Ballot:         largerBallot,
+		OriginalBallot: smallerBallot,
+		ReplicaId:      i.replica.Id,
+		InstanceId:     i.id,
 	})
 
 	// NeedCmdsInReply == true
