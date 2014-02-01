@@ -4,6 +4,8 @@ package replica
 // @assumption:
 // - When a replica pass in the message to instance methods, we assume that the
 //    internal fields of message is readable only and safe to reference to.
+// @assumption(02/01/14):
+// - When a new instance is created, it's at nilstatus.
 // @decision (01/31/14):
 // - Status has precedence. An accepted instance won't handle pre-accept even if
 // - the pre-accept carries larger ballot.
@@ -82,6 +84,7 @@ func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
 		info:         NewInstanceInfo(),
 		recoveryInfo: NewRecoveryInfo(),
 		ballot:       data.NewBallot(0, 0, 0),
+		status:       nilStatus,
 	}
 	return i
 }
@@ -243,9 +246,12 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// accepted instance can be of two stands:
+// accepted instance can be of two roles:
 // - as a sender
+// - - It will handle corresponding accept reply. On majority votes, it will
+// - - transition to committed and broadcast commit.
 // - as a receiver
+// - - It will handle accept, prepare with larger ballot, and commit.
 func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(accepted, committed)
 
@@ -268,6 +274,7 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
+
 	case *data.AcceptReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return noAction, nil // ignore stale PreAcceptReply
@@ -310,8 +317,9 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// preparing instance could only acts as a sender
-//
+// preparing instance could only acts as a sender.
+// It handles most kinds of messages (in some conditions with larger ballot) and
+// ignores all replies except prepare reply.
 func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preparing, preAccepted, accepted, committed)
 
@@ -713,6 +721,8 @@ func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencie
 // *******************************
 
 func (i *Instance) enterNilStatus() {
+	i.checkStatus(preparing)
+	i.status = nilStatus
 }
 
 func (i *Instance) enterPreAcceptedAsSender() {
