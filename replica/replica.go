@@ -8,8 +8,8 @@ package replica
 import (
 	"fmt"
 
-	"github.com/go-epaxos/epaxos"
-	"github.com/go-epaxos/epaxos/data"
+	"github.com/go-distributed/epaxos"
+	"github.com/go-distributed/epaxos/data"
 )
 
 var _ = fmt.Printf
