@@ -222,7 +222,6 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
-
 	case *data.PreAcceptReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			// ignore stale PreAcceptReply
@@ -274,7 +273,6 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
-
 	case *data.AcceptReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return noAction, nil // ignore stale PreAcceptReply
@@ -333,7 +331,6 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
-
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectAccept()
@@ -351,7 +348,6 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.revertPrepare(content)
-
 	case *data.PrepareReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return noAction, nil
