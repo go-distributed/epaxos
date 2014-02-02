@@ -1,7 +1,7 @@
 package epaxos
 
 import (
-	"github.com/go-epaxos/epaxos/data"
+	"github.com/go-distributed/epaxos/data"
 )
 
 type StateMachine interface {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/go-epaxos/epaxos/data"
-	"github.com/go-epaxos/epaxos/test"
+	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/test"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -44,9 +44,7 @@ func commonTestlibExampleInstance() *Instance {
 }
 
 func commonTestlibExampleNilStatusInstance() *Instance {
-	i := commonTestlibExampleInstance()
-	i.status = nilStatus
-	return i
+	return commonTestlibExampleInstance()
 }
 func commonTestlibExamplePreAcceptedInstance() *Instance {
 	i := commonTestlibExampleInstance()
@@ -278,13 +276,13 @@ func TestAcceptedProcessWithRejectAccept(t *testing.T) {
 	inst := commonTestlibExampleAcceptedInstance()
 	expectInst := commonTestlibGetCopyInstance(inst)
 	// create small and large ballots
-	smallBallot := inst.replica.makeInitialBallot()
-	largeBallot := smallBallot.GetIncNumCopy()
+	smallerBallot := inst.replica.makeInitialBallot()
+	largerBallot := smallerBallot.GetIncNumCopy()
 
-	inst.ballot = largeBallot
+	inst.ballot = largerBallot
 	// create an Accept message with small ballot, and send it to the instance
 	ac := &data.Accept{
-		Ballot: smallBallot,
+		Ballot: smallerBallot,
 	}
 	action, m := inst.acceptedProcess(ac)
 
@@ -299,7 +297,7 @@ func TestAcceptedProcessWithRejectAccept(t *testing.T) {
 		InstanceId: inst.id,
 		Ballot:     inst.ballot,
 	})
-	expectInst.ballot = largeBallot
+	expectInst.ballot = largerBallot
 	assert.Equal(t, inst, expectInst)
 }
 
