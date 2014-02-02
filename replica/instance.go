@@ -16,7 +16,7 @@ package replica
 import (
 	"fmt"
 
-	"github.com/go-epaxos/epaxos/data"
+	"github.com/go-distributed/epaxos/data"
 )
 
 var _ = fmt.Printf
@@ -684,6 +684,7 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg Message) {
 	// if the reply has larger ballot, then we can step down
 	panic("")
+
 }
 
 // checkStatus checks the status of the instance

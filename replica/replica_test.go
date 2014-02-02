@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/go-epaxos/epaxos/data"
-	"github.com/go-epaxos/epaxos/test"
+	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/test"
 	"github.com/stretchr/testify/assert"
 )
 

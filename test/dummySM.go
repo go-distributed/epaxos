@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/go-epaxos/epaxos/data"
+	"github.com/go-distributed/epaxos/data"
 )
 
 type DummySM bool
