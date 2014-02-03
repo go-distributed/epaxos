@@ -69,6 +69,9 @@ func (r *Replica) fastQuorum() int {
 	}
 	return int(r.Size - 2)
 }
+func (r *Replica) quorum() int {
+	return int(r.Size / 2)
+}
 
 func (r *Replica) makeInitialBallot() *data.Ballot {
 	return data.NewBallot(r.Epoch, 0, r.Id)
@@ -82,13 +85,13 @@ func (r *Replica) makeInitialDeps() data.Dependencies {
 // ***** Seq, Deps *******
 // ***********************
 
-// findDependencies finds the most recent interference instance from each instance space
+// This func finds the most recent interference instance from each instance space
 // of this replica.
 // It returns (seq, cmds)
 // seq = 1 + max{i.seq, where haveconflicts(i.cmds, cmds)} || 0
 // cmds = most recent interference instance for each instance space
 // TODO: This should be atomic operation in perspective of individual instance.
-func (r *Replica) findDependencies(cmds data.Commands) (uint32, data.Dependencies) {
+func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 	deps := make(data.Dependencies, r.Size)
 	seq := uint32(0)
 
@@ -103,12 +106,12 @@ func (r *Replica) findDependencies(cmds data.Commands) (uint32, data.Dependencie
 			}
 		}
 	}
-	return seq, deps
+	i.cmds, i.seq, i.deps = cmds, seq, deps
 }
 
-// updateDependencies updates the passed in dependencies from replica[from].
+// This func updates the passed in dependencies from replica[from].
 // return seq, updated dependencies and whether the dependencies has changed.
-func (r *Replica) updateDependencies(cmds data.Commands, seq uint32, deps data.Dependencies, from uint8) (uint32, data.Dependencies, bool) {
+func (r *Replica) updateInstance(cmds data.Commands, seq uint32, deps data.Dependencies, from uint8, i *Instance) bool {
 	changed := false
 
 	for curr := range r.InstanceMatrix {
@@ -129,7 +132,8 @@ func (r *Replica) updateDependencies(cmds data.Commands, seq uint32, deps data.D
 		}
 	}
 
-	return seq, deps, changed
+	i.cmds, i.seq, i.deps = cmds, seq, deps
+	return changed
 }
 
 // scanConflicts scans the instances from start to end (high to low).
@@ -146,4 +150,12 @@ func (r *Replica) scanConflicts(instances []*Instance, cmds data.Commands, start
 	}
 
 	return conflictNotFound, false
+}
+
+func (r *Replica) updateMaxInstanceNum(replicaId uint8, instanceId uint64) bool {
+	if r.MaxInstanceNum[replicaId] < instanceId {
+		r.MaxInstanceNum[replicaId] = instanceId
+		return true
+	}
+	return false
 }

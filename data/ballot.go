@@ -68,15 +68,19 @@ func (b *Ballot) Compare(other *Ballot) int {
 func (b *Ballot) GetEpoch() uint32 {
 	return b.epoch
 }
+
 func (b *Ballot) GetNumber() uint64 {
 	return b.number
+}
+func (b *Ballot) SetNumber(number uint64) {
+	b.number = number
 }
 
 func (b *Ballot) IncNumber() {
 	b.number++
 }
 
-func (b *Ballot) SetReplicaId(rId int) {
+func (b *Ballot) SetReplicaId(rId uint8) {
 	b.replicaId = uint8(rId)
 }
 
