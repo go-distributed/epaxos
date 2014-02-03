@@ -182,14 +182,6 @@ func TestNilStatusOnCommitDependency(t *testing.T) {
 // ****** PREACCEPTED *****
 // ************************
 
-// TestPreAcceptedProcessStatus tests
-// if preAcceptedProcess panics as expected
-func TestPreAcceptedProcessStatus(t *testing.T) {
-	inst := commonTestlibExampleAcceptedInstance()
-	ac := &data.Accept{}
-	assert.Panics(t, func() { inst.preAcceptedProcess(ac) })
-}
-
 // TestPreAcceptedProcessWithRejectPreAccept asserts that
 // when a preAccepted instance receives a pre-accept, it will reject the message
 // if ballot > self ballot,
@@ -379,6 +371,278 @@ func TestPreAcceptedProcessWithHandleCommit(t *testing.T) {
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
 	assert.Equal(t, inst, expectInst)
+}
+
+// TestPreAcceptedProcessWithRejectPrepare asserts that
+// when a pre-accepted instance receives a prepare, it will reject the message if
+// the ballot of the prepare message is smaller than that of the instance.
+func TestPreAcceptedProcessWithRejectPrepare(t *testing.T) {
+	// create a pre-accepted instance
+	inst := commonTestlibExamplePreAcceptedInstance()
+
+	// create small and large ballots
+	smallerBallot := inst.replica.makeInitialBallot()
+	largerBallot := smallerBallot.GetIncNumCopy()
+
+	inst.ballot = largerBallot
+	expectInst := commonTestlibGetCopyInstance(inst)
+
+	// create and send a prepare message to the instance
+	pr := &data.Prepare{
+		Ballot: smallerBallot,
+	}
+	action, m := inst.preAcceptedProcess(pr)
+
+	// expect:
+	// - action: replyAction
+	// - message: prepareReply with ok == false, ballot == largerBallot
+	// - instance: nothing changed
+	assert.Equal(t, action, replyAction)
+	assert.Equal(t, m, &data.PrepareReply{
+		Ok:         false,
+		ReplicaId:  inst.replica.Id,
+		InstanceId: inst.id,
+		Ballot:     largerBallot,
+	})
+	assert.Equal(t, inst, expectInst)
+}
+
+// TestPreAcceptedProcessWithHandlePrepare asserts that
+// when a pre-accepted instance receives a prepare, it will handle the message if
+// the ballot of the prepare message is larger than that of the instance.
+func TestPreAcceptedProcessWithHandlePrepare(t *testing.T) {
+	// create a pre-accepted instance
+	inst := commonTestlibExamplePreAcceptedInstance()
+
+	// create small and large ballots
+	smallerBallot := inst.replica.makeInitialBallot()
+	largerBallot := smallerBallot.GetIncNumCopy()
+
+	inst.ballot = smallerBallot
+	expectInst := commonTestlibGetCopyInstance(inst)
+	expectInst.ballot = largerBallot
+
+	// create and send a prepare message to the instance
+	pr := &data.Prepare{
+		Ballot:          largerBallot,
+		NeedCmdsInReply: true,
+	}
+	action, m := inst.preAcceptedProcess(pr)
+
+	// expect:
+	// - action: replyAction
+	// - message: prepareReply with
+	//            ok == true,
+	//            ballot == largerBallot,
+	//            status == preAccepted
+	//            cmds, seq, deps == inst.cmds, inst.seq, inst.deps
+	//            original ballot = smallerBallot
+	// - instance: nothing changed except that inst.ballot = largerBallot
+	assert.Equal(t, action, replyAction)
+	assert.Equal(t, m, &data.PrepareReply{
+		Ok:             true,
+		ReplicaId:      inst.replica.Id,
+		InstanceId:     inst.id,
+		Status:         preAccepted,
+		Seq:            inst.seq,
+		Cmds:           inst.cmds,
+		Deps:           inst.deps,
+		Ballot:         largerBallot,
+		OriginalBallot: smallerBallot,
+	})
+	assert.Equal(t, inst, expectInst)
+}
+
+// TestPreAcceptedProcessWithIgorePreAcceptReply asserts that
+// when a pre-accepted instance receives a pre-accept-reply message, it
+// will ignore the message if the ballot of the message is smaller than that
+// of the instance
+func TestPreAcceptedProcessWithIgorePreAcceptReply(t *testing.T) {
+	// create a pre-accepted instance
+	inst := commonTestlibExamplePreAcceptedInstance()
+
+	// create small and large ballots
+	smallerBallot := inst.replica.makeInitialBallot()
+	largerBallot := smallerBallot.GetIncNumCopy()
+
+	inst.ballot = largerBallot
+	expectInst := commonTestlibGetCopyInstance(inst)
+
+	// create and send a prepare message to the instance
+	pr := &data.PreAcceptReply{
+		Ballot: smallerBallot,
+	}
+	action, m := inst.preAcceptedProcess(pr)
+
+	// expect:
+	// - action: noAction
+	// - message: nil
+	// - instance: nothing changed
+	assert.Equal(t, action, noAction)
+	assert.Equal(t, m, nil)
+	assert.Equal(t, inst, expectInst)
+}
+
+// TestPreAcceptedProcessWithHandlePreAcceptReply asserts that
+// when a pre-accepted instance receives a pre-accept-reply message, it
+// will handle the message if the ballot of the message equals that
+// of the instance
+func TestPreAcceptedProcessWithHandlePreAcceptReply(t *testing.T) {
+	// create a pre-accepted instance
+	inst := commonTestlibExamplePreAcceptedInstance()
+
+	expectSeq := uint32(52)
+	expectDeps := data.Dependencies{1, 2, 3, 4, 8}
+
+	expectInst := commonTestlibGetCopyInstance(inst)
+	expectInst.recoveryInfo = inst.recoveryInfo // we don't need to compare recoveryinfo
+	expectInst.status = accepted
+	expectInst.seq = expectSeq
+	expectInst.deps = expectDeps
+
+	inst.info.preAcceptCount = int(inst.replica.Size/2 - 1)
+
+	// create and send a prepare message to the instance
+	pr := &data.PreAcceptReply{
+		Ballot: inst.ballot,
+		Deps:   commonTestlibExampleDeps(),
+		Seq:    52,
+	}
+	action, m := inst.preAcceptedProcess(pr)
+
+	// expect:
+	// - action: broadcastAction
+	// - message: accept with correct cmds, seq, deps
+	// - instance: status == accepted
+	assert.Equal(t, action, broadcastAction)
+	assert.Equal(t, m, &data.Accept{
+		Cmds:       inst.cmds,
+		Seq:        expectSeq,
+		Deps:       expectDeps,
+		ReplicaId:  inst.replica.Id,
+		InstanceId: inst.id,
+		Ballot:     inst.ballot,
+	})
+	assert.Equal(t, inst, expectInst)
+}
+
+// TestPreAcceptedProcessWithIgorePreAcceptOk asserts that
+// when a pre-accepted instance receives a pre-accept-ok message, it
+// will ignore the message if the instance is not at its
+// initial round, which means the pre-accept-ok message is stale
+func TestPreAcceptedProcessWithIgorePreAcceptOk(t *testing.T) {
+	// create a pre-accepted instance
+	inst := commonTestlibExamplePreAcceptedInstance()
+
+	// create small and large ballots
+	initialBallot := inst.replica.makeInitialBallot()
+	largerBallot := initialBallot.GetIncNumCopy()
+
+	inst.ballot = largerBallot
+	expectInst := commonTestlibGetCopyInstance(inst)
+
+	// create and send a prepare message to the instance
+	pr := &data.PreAcceptOk{}
+	action, m := inst.preAcceptedProcess(pr)
+
+	// expect:
+	// - action: noAction
+	// - message: nil
+	// - instance: nothing changed
+	assert.Equal(t, action, noAction)
+	assert.Equal(t, m, nil)
+	assert.Equal(t, inst, expectInst)
+}
+
+// TestPreAcceptedProcessWithHandlePreAcceptOk asserts that
+// when a pre-accepted instance receives a pre-accept-ok message, it
+// will handle the message if the instance is at its initial round
+//func TestPreAcceptedProcessWithHandlePreAcceptReply(t *testing.T) {
+//	// create a pre-accepted instance
+//	inst := commonTestlibExamplePreAcceptedInstance()
+//
+//	expectInst := commonTestlibGetCopyInstance(inst)
+//	expectInst.recoveryInfo = inst.recoveryInfo // we don't need to compare recoveryinfo
+//	expectInst.status = committed
+//
+//	inst.info.preAcceptCount = int(inst.replica.Size - 3)
+//
+//	// create and send a prepare message to the instance
+//	pr := &data.PreAcceptOk{}
+//	action, m := inst.preAcceptedProcess(pr)
+//
+//	// expect:
+//	// - action: broadcastAction
+//	// - message: accept with correct cmds, seq, deps
+//	// - instance: status == accepted
+//	assert.Equal(t, action, broadcastAction)
+//	assert.Equal(t, m, &data.Commit{
+//		Cmds:       inst.cmds,
+//		Seq:        expectSeq,
+//		Deps:       expectDeps,
+//		ReplicaId:  inst.replica.Id,
+//		InstanceId: inst.id,
+//	})
+//	assert.Equal(t, inst, expectInst)
+//}
+
+// TestPreAcceptedProcessWithPrepareReply asserts that
+// when a pre-accepted instance receives a prepare-reply message, it
+// will
+// 1, panic if the instance is at its initial round
+// 2, ignore the message if the instance is not at its initial round
+func TestPreAcceptedProcessWithPrepareReply(t *testing.T) {
+	// create a pre-accepted instance
+	inst := commonTestlibExamplePreAcceptedInstance()
+
+	// create small and large ballots
+	initialBallot := inst.replica.makeInitialBallot()
+	largerBallot := initialBallot.GetIncNumCopy()
+
+	inst.ballot = initialBallot
+
+	// 1,
+	// create a prepare-reply and send it to the intance
+	pr := &data.PrepareReply{}
+	// expect: panic on receiving the prepare-reply message
+	assert.Panics(t, func() { inst.preAcceptedProcess(pr) })
+
+	// 2,
+	// update instance's ballot
+	inst.ballot = largerBallot
+	expectInst := commonTestlibGetCopyInstance(inst)
+
+	// create a prepare-reply and send it to the intance
+	pr = &data.PrepareReply{}
+	action, msg := inst.preAcceptedProcess(pr)
+
+	// expect:
+	// - action: noAction
+	// - message: nil
+	// - instance: nothing changed
+	assert.Equal(t, action, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, inst, expectInst)
+}
+
+// TestPreAcceptedProcessWithPanic asserts that
+// the preAcceptedProcess func will panic if
+// 1, the instance is not at preAccepted status
+// 2, it receive unexpected messages such as accept-reply (because one
+// instance cannot revert from accepted to preAccepted status) or propose
+func TestPreAcceptedProcessWithPanic(t *testing.T) {
+	// 1, should panic if the instance is not at preAccepted status
+	inst := commonTestlibExampleAcceptedInstance()
+	cm := &data.Commit{}
+	assert.Panics(t, func() { inst.preAcceptedProcess(cm) })
+
+	// 2, should panic if the instance receives accept-reply or propose messages
+	inst = commonTestlibExamplePreAcceptedInstance()
+	ar := &data.AcceptReply{}
+	pp := &data.Propose{}
+
+	assert.Panics(t, func() { inst.preAcceptedProcess(ar) })
+	assert.Panics(t, func() { inst.preAcceptedProcess(pp) })
 }
 
 // **********************

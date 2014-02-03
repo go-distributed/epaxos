@@ -522,6 +522,9 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 	// update relevants
 	i.ballot = p.Ballot
 	i.info.preAcceptCount++
+	if p.Seq > i.seq {
+		i.seq = p.Seq
+	}
 	if same := i.deps.Union(p.Deps); !same {
 		// We take difference of deps only for replies from other replica.
 		if i.info.preAcceptCount > 1 {
