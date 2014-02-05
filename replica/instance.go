@@ -61,11 +61,13 @@ type InstanceInfo struct {
 	acceptCount    int
 }
 
+// recovery info will keep information of the instance info that we will send out on
+// the next stage.
 type RecoveryInfo struct {
 	preAcceptedCount int
 	replyCount       int
-	maxBallot        *data.Ballot
-	ballot           *data.Ballot
+	maxBallot        *data.Ballot // the maximum ballot we have seen so far
+	ballot           *data.Ballot // the ballot of current stored instance info
 
 	cmds         data.Commands
 	deps         data.Dependencies

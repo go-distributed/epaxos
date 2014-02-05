@@ -70,8 +70,7 @@ func commonTestlibExampleCommittedInstance() *Instance {
 }
 func commonTestlibExamplePreParingInstance() *Instance {
 	i := commonTestlibExampleInstance()
-	i.status = preparing
-	i.ballot = i.replica.makeInitialBallot()
+	i.enterPreparing()
 	return i
 }
 
