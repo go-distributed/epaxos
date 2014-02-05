@@ -12,6 +12,8 @@ package replica
 // @decision (02/01/14):
 // - Executed won't be included in instance statuses anymore.
 // - Executed will be recorded in a flag. This will simplify the state machine.
+// @decision (02/05/14):
+// - No-op == Commands(nil)
 
 import (
 	"fmt"
@@ -68,12 +70,12 @@ type RecoveryInfo struct {
 	replyCount       int
 	ballot           *data.Ballot // for book keeping
 
-	cmds         data.Commands
-	seq          uint32
-	deps         data.Dependencies
-	status       uint8
-	formerStatus uint8
-	canAccept    bool
+	cmds                      data.Commands
+	seq                       uint32
+	deps                      data.Dependencies
+	status                    uint8
+	formerStatus              uint8
+	formerLeaderWasOnFastPath bool
 }
 
 // ****************************
@@ -125,7 +127,7 @@ func (r *RecoveryInfo) isBeforeStatus(status uint8) bool {
 }
 
 func (r *RecoveryInfo) isAtStatus(status uint8) bool {
-	return r.status < status
+	return r.status == status
 }
 
 func (i *Instance) freshlyCreated() bool {
@@ -143,7 +145,12 @@ func (i *InstanceInfo) reset() {
 }
 
 func (i *Instance) initRecoveryInfo() {
-	i.recoveryInfo.canAccept = true
+	// do not touch recoveryInfo.ballot, keep it all zeros
+	if i.recoveryInfo.ballot.Compare(data.NewBallot(0, 0, 0)) != 0 {
+		panic("")
+	}
+
+	i.recoveryInfo.formerLeaderWasOnFastPath = true
 	i.recoveryInfo.replyCount = 0
 	i.recoveryInfo.cmds = i.cmds
 	i.recoveryInfo.deps = i.deps
@@ -154,8 +161,8 @@ func (i *Instance) initRecoveryInfo() {
 		i.recoveryInfo.preAcceptedCount = 0
 	} else {
 		i.recoveryInfo.preAcceptedCount = 1
-		i.recoveryInfo.replyCount = 1
 	}
+	i.recoveryInfo.replyCount = 1
 }
 
 // ******************************
@@ -738,7 +745,7 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 	}
 
 	// jump to next status on receiving enough replies >= (N/2 + 1) including sender
-	if i.recoveryInfo.replyCount > i.replica.quorum() {
+	if i.recoveryInfo.replyCount >= i.replica.quorum()+1 {
 		i.makeRecoveryDecision()
 
 		switch i.status {
@@ -755,7 +762,16 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 	return noAction, nil
 }
 
+// after calling this funciton, i.status reflects the decision we made
 func (i *Instance) makeRecoveryDecision() {
+	// [*] Here if i.recoveryInfo.cmds == nil, then it means
+	// 1, none of the replies has cmds.
+	// 2, i.cmds == nil, because in initRecovryInfo, i.recoveryInfo.cmds
+	//    is set to i.cmds.
+	// So, it's safe to set i.cmds to i.recoveryInfo.cmds here.
+	//
+	// Same for seq and deps
+	//
 	i.cmds = i.recoveryInfo.cmds
 	i.seq = i.recoveryInfo.seq
 	i.deps = i.recoveryInfo.deps
@@ -763,17 +779,23 @@ func (i *Instance) makeRecoveryDecision() {
 	// determine status
 	switch i.recoveryInfo.status {
 	case accepted:
-		i.status = accepted
+		i.enterAcceptedAsSender()
 	case preAccepted:
 		// test if we have received enough preAccept replies
 		if i.recoveryInfo.preAcceptedCount < i.replica.quorum() {
-			i.recoveryInfo.canAccept = false
+			i.recoveryInfo.formerLeaderWasOnFastPath = false
 		}
-		if i.recoveryInfo.canAccept {
-			i.status = accepted
+
+		// if former leader committed on fast-path,
+		// then we must send accept instead of pre-accept
+		if i.recoveryInfo.formerLeaderWasOnFastPath {
+			i.enterAcceptedAsSender()
+		} else {
+			i.enterPreAcceptedAsSender()
 		}
 	case nilStatus:
-		i.status = preAccepted
+		// get ready to send Accept for No-op
+		i.enterAcceptedAsSender()
 	default:
 		panic("")
 	}
@@ -789,7 +811,13 @@ func (i *Instance) prepareReplyCommittedHelper(p *data.PrepareReply) {
 	i.enterCommitted()
 }
 
+// Assumptions:
+// p.Deps must be non-zeros
 func (i *Instance) prepareReplyAcceptedHelper(p *data.PrepareReply) {
+	if p.Deps.IsInitialDependencies() {
+		panic("")
+	}
+
 	i.recoveryInfo.replyCount++
 
 	// record the info of the newest accepted reply
@@ -801,17 +829,33 @@ func (i *Instance) prepareReplyAcceptedHelper(p *data.PrepareReply) {
 	}
 }
 
-// assumption: recoveryinfo.ballot = all zeros if
-// the instance's former status = nilStatus
-// and the deps in reply cannot be all zeros
+// Assumptions:
+// 1, recoveryinfo.ballot = all zeros if and only if
+// the instance's former status = nilStatus.
+// 2, the deps in reply must be non-zeros.
+//
+// So there is at most one time that i.recoveryInfo.deps be all zeros when
+// calling IsConflictWith.
 func (i *Instance) prepareReplyPreAcceptedHelper(p *data.PrepareReply) {
+	if p.Deps.IsInitialDependencies() {
+		panic("")
+	}
+
 	i.recoveryInfo.replyCount++
 	i.recoveryInfo.preAcceptedCount++
 
-	conflict := i.recoveryInfo.deps.IsConflictWith(p.Deps)
+	var same bool
+	if i.recoveryInfo.deps.IsInitialDependencies() {
+		if i.recoveryInfo.preAcceptedCount > 1 {
+			panic("")
+		}
+		same = true
+	} else {
+		same = i.recoveryInfo.deps.Same(p.Deps)
+	}
 
-	if !p.Ballot.IsInitialBallot() || p.IsFromLeader || conflict {
-		i.recoveryInfo.canAccept = false
+	if !p.Ballot.IsInitialBallot() || p.IsFromLeader || !same {
+		i.recoveryInfo.formerLeaderWasOnFastPath = false
 	}
 
 	// record the info of the newest pre-accepted reply
@@ -828,7 +872,7 @@ func (i *Instance) prepareReplyNilStatusHelper(p *data.PrepareReply) {
 }
 
 func (i *Instance) updateRcoveryStatusAndBallot(p *data.PrepareReply) bool {
-	// refresh the ballot if we enter a later status
+	// refresh the ballot if we enter a higher status
 	if i.recoveryInfo.isBeforeStatus(p.Status) {
 		i.recoveryInfo.status = p.Status
 		i.recoveryInfo.ballot = p.Ballot

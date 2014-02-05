@@ -35,21 +35,21 @@ func (d Dependencies) Clone() Dependencies {
 	return deps
 }
 
-func (d Dependencies) IsConflictWith(other Dependencies) bool {
+func (d Dependencies) Same(other Dependencies) bool {
 	if len(d) != len(other) {
 		panic("Same: different size!")
 	}
 
 	if d.IsInitialDependencies() || other.IsInitialDependencies() {
-		return false
+		panic("Same: found all zero dependencies")
 	}
 
 	for i := range d {
 		if d[i] != other[i] {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (d Dependencies) IsInitialDependencies() bool {
