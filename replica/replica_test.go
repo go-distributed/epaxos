@@ -37,11 +37,11 @@ func TestMakeInitialBallot(t *testing.T) {
 
 // return a replica with id=5, size=5, and maxinstancenum of [1,2,3,4,5]
 func depsTestSetupReplica() (r *Replica, i *Instance) {
-	r = New(5, 5, new(test.DummySM))
+	r = New(4, 5, new(test.DummySM))
 	for i := 0; i < 5; i++ {
 		r.MaxInstanceNum[i] = uint64(conflictNotFound + 1 + uint64(i))
 		instance := NewInstance(r, conflictNotFound+1+uint64(i))
-		instance.cmds = commonTestlibExampleCommands().GetCopy()
+		instance.cmds = commonTestlibExampleCommands().Clone()
 		r.InstanceMatrix[i][instance.id] = instance
 	}
 	i = NewInstance(r, 6)
@@ -68,7 +68,7 @@ func TestUpdateInstance(t *testing.T) {
 
 	deps := data.Dependencies{1, 2, 3, 4, 5}
 
-	changed := r.updateInstance(cmds, 0, deps, 5, i)
+	changed := r.updateInstance(cmds, 0, deps, r.Id, i)
 	assert.False(t, changed)
 	// won't search at all. so seq isn't incremented.
 	assert.Equal(t, i.seq, uint32(0))

@@ -41,13 +41,13 @@ func TestUnion(t *testing.T) {
 	assert.Equal(t, self, Dependencies{5, 4, 3, 3, 4})
 }
 
-// TestGetCopy tests the result of the GetCopy func
-func TestDependenciesGetCopy(t *testing.T) {
+// TestClone tests the result of the Clone func
+func TestDependenciesClone(t *testing.T) {
 	self := make(Dependencies, 5)
 	for i := range self {
 		self[i] = uint64(i)
 	}
-	other := self.GetCopy()
+	other := self.Clone()
 
 	assert.True(t, &self != &other)
 	assert.Equal(t, self, other)
@@ -56,5 +56,5 @@ func TestDependenciesGetCopy(t *testing.T) {
 func TestDependenciesNilPanic(t *testing.T) {
 	var d Dependencies
 	d = nil
-	assert.Panics(t, func() { d.GetCopy() })
+	assert.Panics(t, func() { d.Clone() })
 }

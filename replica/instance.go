@@ -119,7 +119,7 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 }
 
 func (i *Instance) freshlyCreated() bool {
-	return i.ballot.GetEpoch() == 0
+	return i.ballot.Epoch() == 0
 }
 
 func (i *Instance) ableToFastPath() bool {
@@ -408,7 +408,7 @@ func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
 		Ok:         false,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Ballot:     i.ballot.GetCopy(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
@@ -421,7 +421,7 @@ func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 		Ok:         false,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Ballot:     i.ballot.GetCopy(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
@@ -443,10 +443,10 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	return fastQuorumAction, &data.PreAccept{
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Cmds:       p.Cmds.GetCopy(),
+		Cmds:       p.Cmds.Clone(),
 		Seq:        i.seq,
-		Deps:       i.deps.GetCopy(),
-		Ballot:     i.ballot.GetCopy(),
+		Deps:       i.deps.Clone(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
@@ -538,9 +538,9 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		i.enterCommitted()
 
 		return broadcastAction, &data.Commit{
-			Cmds:       i.cmds.GetCopy(),
+			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
-			Deps:       i.deps.GetCopy(),
+			Deps:       i.deps.Clone(),
 			ReplicaId:  i.replica.Id,
 			InstanceId: i.id,
 		}
@@ -549,12 +549,12 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		i.enterAcceptedAsSender()
 
 		return broadcastAction, &data.Accept{
-			Cmds:       i.cmds.GetCopy(),
+			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
-			Deps:       i.deps.GetCopy(),
+			Deps:       i.deps.Clone(),
 			ReplicaId:  i.replica.Id,
 			InstanceId: i.id,
-			Ballot:     i.ballot.GetCopy(),
+			Ballot:     i.ballot.Clone(),
 		}
 	}
 	return noAction, nil
@@ -582,7 +582,7 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 		Ok:         true,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Ballot:     i.ballot.GetCopy(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
@@ -620,9 +620,9 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 	if i.info.acceptCount >= i.replica.quorum() {
 		i.enterCommitted()
 		return broadcastAction, &data.Commit{
-			Cmds:       i.cmds.GetCopy(),
+			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
-			Deps:       i.deps.GetCopy(),
+			Deps:       i.deps.Clone(),
 			ReplicaId:  i.replica.Id,
 			InstanceId: i.id,
 		}
@@ -651,7 +651,7 @@ func (i *Instance) revertPrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
-	oldBallot := i.ballot.GetCopy()
+	oldBallot := i.ballot.Clone()
 
 	// We optimize the case of committed instance in reply with ok=true message
 	// and do not update self ballot (useless for committed ones)
@@ -666,7 +666,7 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 	// if the preparing instance know the commands (i.e. it has been told
 	// beforehand), we won't bother to serialize it over the network.
 	if p.NeedCmdsInReply {
-		cmds = i.cmds.GetCopy()
+		cmds = i.cmds.Clone()
 	}
 
 	return replyAction, &data.PrepareReply{
@@ -676,8 +676,8 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		Status:         i.status,
 		Seq:            i.seq,
 		Cmds:           cmds,
-		Deps:           i.deps.GetCopy(),
-		Ballot:         p.Ballot.GetCopy(),
+		Deps:           i.deps.Clone(),
+		Ballot:         p.Ballot.Clone(),
 		OriginalBallot: oldBallot,
 	}
 }
@@ -715,7 +715,7 @@ func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencie
 		InstanceId: i.id,
 		Seq:        seq,
 		Deps:       deps,
-		Ballot:     i.ballot.GetCopy(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
@@ -755,11 +755,13 @@ func (i *Instance) enterPreparing() {
 	// - seen any message about this instance before (with ballot).
 	// - never seen anything concerning this instance before.
 	if i.freshlyCreated() {
+		// epoch.1.id
 		ballot := i.replica.makeInitialBallot()
-		ballot.SetNumber(i.ballot.GetNumber() + 1)
+		ballot.SetNumber(1)
 		i.ballot = ballot
 	} else {
 		i.ballot.IncNumber()
+		i.ballot.SetReplicaId(i.replica.Id)
 	}
 	i.initRecoveryInfo()
 	i.status = preparing

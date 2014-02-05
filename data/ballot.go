@@ -65,11 +65,11 @@ func (b *Ballot) Compare(other *Ballot) int {
 	return 0
 }
 
-func (b *Ballot) GetEpoch() uint32 {
+func (b *Ballot) Epoch() uint32 {
 	return b.epoch
 }
 
-func (b *Ballot) GetNumber() uint64 {
+func (b *Ballot) Number() uint64 {
 	return b.number
 }
 func (b *Ballot) SetNumber(number uint64) {
@@ -84,7 +84,7 @@ func (b *Ballot) SetReplicaId(rId uint8) {
 	b.replicaId = uint8(rId)
 }
 
-func (b *Ballot) GetIncNumCopy() *Ballot {
+func (b *Ballot) IncNumClone() *Ballot {
 	return &Ballot{
 		b.epoch,
 		b.number + 1,
@@ -96,7 +96,7 @@ func (b *Ballot) IsInitialBallot() bool {
 	return b.number == 0
 }
 
-func (b *Ballot) GetCopy() *Ballot {
+func (b *Ballot) Clone() *Ballot {
 	return &Ballot{
 		b.epoch,
 		b.number,
