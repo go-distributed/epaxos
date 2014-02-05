@@ -59,19 +59,19 @@ func TestDependenciesNilPanic(t *testing.T) {
 	assert.Panics(t, func() { d.Clone() })
 }
 
-func TestDependenciesIsConflictWith(t *testing.T) {
+func TestDependenciesSame(t *testing.T) {
 	self := make(Dependencies, 5)
 	for i := range self {
 		self[i] = uint64(i)
 	}
 	other := self.Clone()
-	assert.False(t, self.IsConflictWith(other))
+	assert.True(t, self.Same(other))
 
 	for i := range other {
 		other[i] = uint64(len(other) - i)
 	}
-	assert.True(t, self.IsConflictWith(other))
+	assert.False(t, self.Same(other))
 
 	other = make(Dependencies, 5)
-	assert.False(t, self.IsConflictWith(other))
+	assert.Panics(t, func() { self.Same(other) })
 }

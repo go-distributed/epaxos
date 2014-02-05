@@ -19,6 +19,7 @@ var _ = fmt.Printf
 // ****************************
 const defaultInstancesLength = 1024
 const conflictNotFound = data.ConflictNotFound
+
 // actions
 const (
 	noAction uint8 = iota + 1
