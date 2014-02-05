@@ -16,7 +16,7 @@ func TestCommandCompareAndCopy(t *testing.T) {
 	}
 	assert.True(t, self[0].Compare(self[1]) != 0)
 
-	other := self.GetCopy()
+	other := self.Clone()
 
 	assert.Equal(t, self, other)
 	assert.True(t, &self != &other)
@@ -26,14 +26,14 @@ func TestCommandCompareAndCopy(t *testing.T) {
 	}
 }
 
-func TestCommandGetCopy(t *testing.T) {
+func TestCommandClone(t *testing.T) {
 	nilCmds := Commands(nil)
-	assert.Equal(t, nilCmds.GetCopy(), Commands(nil))
+	assert.Equal(t, nilCmds.Clone(), Commands(nil))
 	manyCmds := Commands{
 		Command("1"),
 		Command("2"),
 	}
 	assert.True(t,
-		assert.ObjectsAreEqual(manyCmds.GetCopy(), manyCmds),
+		assert.ObjectsAreEqual(manyCmds.Clone(), manyCmds),
 	)
 }

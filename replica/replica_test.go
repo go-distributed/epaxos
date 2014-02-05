@@ -36,48 +36,49 @@ func TestMakeInitialBallot(t *testing.T) {
 }
 
 // return a replica with id=5, size=5, and maxinstancenum of [1,2,3,4,5]
-func depsTestSetupReplica() (r *Replica) {
-	r = New(5, 5, new(test.DummySM))
+func depsTestSetupReplica() (r *Replica, i *Instance) {
+	r = New(4, 5, new(test.DummySM))
 	for i := 0; i < 5; i++ {
 		r.MaxInstanceNum[i] = uint64(conflictNotFound + 1 + uint64(i))
 		instance := NewInstance(r, conflictNotFound+1+uint64(i))
-		instance.cmds = commonTestlibExampleCommands().GetCopy()
+		instance.cmds = commonTestlibExampleCommands().Clone()
 		r.InstanceMatrix[i][instance.id] = instance
 	}
+	i = NewInstance(r, 6)
 	return
 }
 
 // If commands are conflicted with instance on each space [1, 2, 3, 4, 5].
 // It should return seq=1, deps=[1,2,3,4,5]
-func TestFindDependencies(t *testing.T) {
-	r := depsTestSetupReplica()
-	cmds := commonTestlibExampleCommands()
-	seq, deps := r.findDependencies(cmds)
+func TestInitInstance(t *testing.T) {
+	r, i := depsTestSetupReplica()
+	Cmds := commonTestlibExampleCommands()
+	r.initInstance(Cmds, i)
 
-	assert.Equal(t, seq, uint32(1))
-	assert.Equal(t, deps, data.Dependencies{1, 2, 3, 4, 5})
+	assert.Equal(t, i.cmds, Cmds)
+	assert.Equal(t, i.seq, uint32(1))
+	assert.Equal(t, i.deps, data.Dependencies{1, 2, 3, 4, 5})
 }
 
-// If no change in deps, it should return changed=false and not change seq, deps
-// If changes in deps, it should return changed=true and return updated seq, deps
-func TestUpdateDependencies(t *testing.T) {
-	r := depsTestSetupReplica()
+// If no change in deps, it should return changed=false
+// If changes in deps, it should return changed=true
+func TestUpdateInstance(t *testing.T) {
+	r, i := depsTestSetupReplica()
 	cmds := commonTestlibExampleCommands()
 
-	seq := uint32(0)
-	selfDeps := data.Dependencies{1, 2, 3, 4, 5}
+	deps := data.Dependencies{1, 2, 3, 4, 5}
 
-	notChangedSeq, notChangedDeps, changed := r.updateDependencies(cmds, seq, selfDeps, 5)
+	changed := r.updateInstance(cmds, 0, deps, r.Id, i)
 	assert.False(t, changed)
-	assert.Equal(t, notChangedSeq, seq)
-	assert.Equal(t, notChangedDeps, selfDeps)
+	// won't search at all. so seq isn't incremented.
+	assert.Equal(t, i.seq, uint32(0))
+	assert.Equal(t, i.deps, deps)
 
-	emptyDeps := data.Dependencies{0, 0, 0, 0, 0}
-	expectedDeps := data.Dependencies{0, 2, 3, 4, 5} // it's from r0
+	emptyDeps := data.Dependencies{2, 0, 0, 0, 0}
+	expectedDeps := data.Dependencies{2, 2, 3, 4, 5} // it's from r0
 
-	changedSeq, changedDeps, changed := r.updateDependencies(
-		cmds, 0, emptyDeps, 0)
+	changed = r.updateInstance(cmds, 0, emptyDeps, 0, i)
 	assert.True(t, changed)
-	assert.Equal(t, changedSeq, uint32(1))
-	assert.Equal(t, changedDeps, expectedDeps)
+	assert.Equal(t, i.seq, uint32(1))
+	assert.Equal(t, i.deps, expectedDeps)
 }

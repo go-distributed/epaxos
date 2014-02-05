@@ -24,7 +24,7 @@ func (d Dependencies) Union(other Dependencies) bool {
 	return same
 }
 
-func (d Dependencies) GetCopy() Dependencies {
+func (d Dependencies) Clone() Dependencies {
 	if d == nil {
 		panic("")
 	}

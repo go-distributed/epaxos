@@ -14,7 +14,7 @@ func (self Command) Compare(other Command) int {
 	return bytes.Compare(self, other)
 }
 
-func (c Commands) GetCopy() Commands {
+func (c Commands) Clone() Commands {
 	if c == nil {
 		return nil
 	}

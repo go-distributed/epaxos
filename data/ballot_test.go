@@ -104,9 +104,9 @@ func TestGetIncNumCopy(t *testing.T) {
 	assert.Equal(t, c.GetNumber(), uint64(35))
 }
 
-func TestBallotGetCopy(t *testing.T) {
+func TestBallotClone(t *testing.T) {
 	b := NewBallot(2, 34, 4)
-	c := b.GetCopy()
+	c := b.Clone()
 
 	assert.True(t, &b != &c)
 	assert.Equal(t, b, c)

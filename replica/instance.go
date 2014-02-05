@@ -3,7 +3,7 @@ package replica
 // This file implements instance module.
 // @assumption:
 // - When a replica pass in the message to instance methods, we assume that the
-//    internal fields of message is readable only and safe to reference to.
+//    internal fields of message is readable only and safe to reference to, except deps.
 // @assumption(02/01/14):
 // - When a new instance is created, it's at nilstatus.
 // @decision (01/31/14):
@@ -62,9 +62,10 @@ type InstanceInfo struct {
 }
 
 type RecoveryInfo struct {
-	preAcceptedCount  int
-	replyCount        int
-	maxAcceptedBallot *data.Ballot
+	preAcceptedCount int
+	replyCount       int
+	maxBallot        *data.Ballot
+	ballot           *data.Ballot
 
 	cmds         data.Commands
 	deps         data.Dependencies
@@ -96,7 +97,10 @@ func NewInstanceInfo() *InstanceInfo {
 }
 
 func NewRecoveryInfo() *RecoveryInfo {
-	return &RecoveryInfo{}
+	return &RecoveryInfo{
+		maxBallot: data.NewBallot(0, 0, 0),
+		ballot:    data.NewBallot(0, 0, 0),
+	}
 }
 
 // *********************************
@@ -115,7 +119,7 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 }
 
 func (i *Instance) freshlyCreated() bool {
-	return i.ballot.GetEpoch() == 0
+	return i.ballot.Epoch() == 0
 }
 
 func (i *Instance) ableToFastPath() bool {
@@ -130,7 +134,8 @@ func (i *InstanceInfo) reset() {
 
 func (i *Instance) initRecoveryInfo() {
 	i.recoveryInfo.replyCount = 0
-	i.recoveryInfo.maxAcceptedBallot = i.ballot.GetCopy()
+	i.recoveryInfo.ballot = i.ballot
+	i.recoveryInfo.maxBallot = i.ballot
 	i.recoveryInfo.cmds = i.cmds
 	i.recoveryInfo.deps = i.deps
 	i.recoveryInfo.status = i.status
@@ -222,7 +227,6 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
-
 	case *data.PreAcceptReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			// ignore stale PreAcceptReply
@@ -274,7 +278,6 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
-
 	case *data.AcceptReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return noAction, nil // ignore stale PreAcceptReply
@@ -333,7 +336,6 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
-
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectAccept()
@@ -351,7 +353,6 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			return i.rejectPrepare()
 		}
 		return i.revertPrepare(content)
-
 	case *data.PrepareReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return noAction, nil
@@ -407,7 +408,7 @@ func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
 		Ok:         false,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Ballot:     i.ballot.GetCopy(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
@@ -420,7 +421,7 @@ func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 		Ok:         false,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Ballot:     i.ballot.GetCopy(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
@@ -433,11 +434,8 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	if p.Cmds == nil || !i.freshlyCreated() {
 		panic("")
 	}
-	seq, deps := i.replica.findDependencies(p.Cmds)
 
-	i.cmds = p.Cmds
-	i.seq = seq
-	i.deps = deps
+	i.replica.initInstance(p.Cmds, i)
 	i.ballot = i.replica.makeInitialBallot()
 
 	i.enterPreAcceptedAsSender()
@@ -445,33 +443,32 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	return fastQuorumAction, &data.PreAccept{
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Cmds:       p.Cmds.GetCopy(),
-		Seq:        seq,
-		Deps:       deps.GetCopy(),
-		Ballot:     i.ballot.GetCopy(),
+		Cmds:       p.Cmds.Clone(),
+		Seq:        i.seq,
+		Deps:       i.deps.Clone(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
 // When handling pre-accept, instance will set its ballot to newer one, and
-// update seq, deps if find any change.
+// update seq, deps if any change's found.
 // Reply: pre-accept-OK if no change in deps; otherwise a normal pre-accept-reply.
-// The pre-accept-OK contains just one field, which is a serilization optimization.
+// The pre-accept-OK contains just one field, which is a big optimization for serilization
 func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message) {
 	if p.Ballot.Compare(i.ballot) < 0 {
 		panic("")
 	}
 
 	i.enterPreAcceptedAsReceiver()
-	i.cmds, i.ballot = p.Cmds, p.Ballot
-	seq, deps, changed := i.replica.updateDependencies(p.Cmds, p.Seq, p.Deps, p.ReplicaId)
+	i.ballot = p.Ballot
+	changed := i.replica.updateInstance(p.Cmds, p.Seq, p.Deps, p.ReplicaId, i)
 
 	if changed {
-		i.seq, i.deps = seq, deps
-		return replyAction, i.makePreAcceptReply(true, seq, deps)
+		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
 	}
 	// not initial leader
-	if p.Ballot.GetNumber() != 0 {
-		return replyAction, i.makePreAcceptReply(true, seq, deps)
+	if !p.Ballot.IsInitialBallot() {
+		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
 	}
 	// pre-accept-ok for possible fast quorum commit
 	return replyAction, &data.PreAcceptOk{
@@ -526,6 +523,9 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 	// update relevants
 	i.ballot = p.Ballot
 	i.info.preAcceptCount++
+	if p.Seq > i.seq {
+		i.seq = p.Seq
+	}
 	if same := i.deps.Union(p.Deps); !same {
 		// We take difference of deps only for replies from other replica.
 		if i.info.preAcceptCount > 1 {
@@ -538,23 +538,23 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		i.enterCommitted()
 
 		return broadcastAction, &data.Commit{
-			Cmds:       i.cmds.GetCopy(),
+			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
-			Deps:       i.deps.GetCopy(),
+			Deps:       i.deps.Clone(),
 			ReplicaId:  i.replica.Id,
 			InstanceId: i.id,
 		}
-	} else if i.info.preAcceptCount >= int(i.replica.Size/2) && !i.ableToFastPath() {
+	} else if i.info.preAcceptCount >= i.replica.quorum() && !i.ableToFastPath() {
 		// TODO: persistent
 		i.enterAcceptedAsSender()
 
 		return broadcastAction, &data.Accept{
-			Cmds:       i.cmds.GetCopy(),
+			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
-			Deps:       i.deps.GetCopy(),
+			Deps:       i.deps.Clone(),
 			ReplicaId:  i.replica.Id,
 			InstanceId: i.id,
-			Ballot:     i.ballot.GetCopy(),
+			Ballot:     i.ballot.Clone(),
 		}
 	}
 	return noAction, nil
@@ -582,7 +582,7 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 		Ok:         true,
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
-		Ballot:     i.ballot.GetCopy(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
@@ -617,12 +617,12 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 	}
 
 	i.info.acceptCount++
-	if i.info.acceptCount >= int(i.replica.Size/2) {
+	if i.info.acceptCount >= i.replica.quorum() {
 		i.enterCommitted()
 		return broadcastAction, &data.Commit{
-			Cmds:       i.cmds.GetCopy(),
+			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
-			Deps:       i.deps.GetCopy(),
+			Deps:       i.deps.Clone(),
 			ReplicaId:  i.replica.Id,
 			InstanceId: i.id,
 		}
@@ -645,12 +645,13 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 }
 
 func (i *Instance) revertPrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
+	i.checkStatus(preparing)
 	i.status = i.recoveryInfo.formerStatus
 	return i.handlePrepare(p)
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
-	oldBallot := i.ballot.GetCopy()
+	oldBallot := i.ballot.Clone()
 
 	// We optimize the case of committed instance in reply with ok=true message
 	// and do not update self ballot (useless for committed ones)
@@ -665,7 +666,7 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 	// if the preparing instance know the commands (i.e. it has been told
 	// beforehand), we won't bother to serialize it over the network.
 	if p.NeedCmdsInReply {
-		cmds = i.cmds.GetCopy()
+		cmds = i.cmds.Clone()
 	}
 
 	return replyAction, &data.PrepareReply{
@@ -675,14 +676,15 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		Status:         i.status,
 		Seq:            i.seq,
 		Cmds:           cmds,
-		Deps:           i.deps.GetCopy(),
-		Ballot:         p.Ballot.GetCopy(),
+		Deps:           i.deps.Clone(),
+		Ballot:         p.Ballot.Clone(),
 		OriginalBallot: oldBallot,
 	}
 }
 
 func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg Message) {
 	// if the reply has larger ballot, then we can step down
+	//ri := i.recoveryInfo
 	panic("")
 
 }
@@ -713,18 +715,13 @@ func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencie
 		InstanceId: i.id,
 		Seq:        seq,
 		Deps:       deps,
-		Ballot:     i.ballot.GetCopy(),
+		Ballot:     i.ballot.Clone(),
 	}
 }
 
 // *******************************
 // ******* State Transition ******
 // *******************************
-
-func (i *Instance) enterNilStatus() {
-	i.checkStatus(preparing)
-	i.status = nilStatus
-}
 
 func (i *Instance) enterPreAcceptedAsSender() {
 	i.checkStatus(nilStatus, preparing)
@@ -753,6 +750,19 @@ func (i *Instance) enterCommitted() {
 }
 func (i *Instance) enterPreparing() {
 	i.checkStatus(nilStatus, preAccepted, preparing, accepted)
+
+	// differentiates two cases on entering preparing:
+	// - seen any message about this instance before (with ballot).
+	// - never seen anything concerning this instance before.
+	if i.freshlyCreated() {
+		// epoch.1.id
+		ballot := i.replica.makeInitialBallot()
+		ballot.SetNumber(1)
+		i.ballot = ballot
+	} else {
+		i.ballot.IncNumber()
+		i.ballot.SetReplicaId(i.replica.Id)
+	}
 	i.initRecoveryInfo()
 	i.status = preparing
 }
