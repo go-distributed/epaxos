@@ -2,6 +2,8 @@ package data
 
 type Dependencies []uint64
 
+const ConflictNotFound = 0
+
 // union unions the deps into the receiver
 // return true if deps are same
 func (d Dependencies) Union(other Dependencies) bool {
@@ -31,4 +33,34 @@ func (d Dependencies) Clone() Dependencies {
 	deps := make(Dependencies, len(d))
 	copy(deps, d)
 	return deps
+}
+
+func (d Dependencies) IsConflictWith(other Dependencies) bool {
+	if len(d) != len(other) {
+		panic("Same: different size!")
+	}
+
+	if d.IsInitialDependencies() || other.IsInitialDependencies() {
+		return false
+	}
+
+	for i := range d {
+		if d[i] != other[i] {
+			return true
+		}
+	}
+	return false
+}
+
+func (d Dependencies) IsInitialDependencies() bool {
+	if len(d) == 0 {
+		panic("IsInitialDependencies: zero length")
+	}
+
+	for i := range d {
+		if d[i] != ConflictNotFound {
+			return false
+		}
+	}
+	return true
 }

@@ -17,9 +17,8 @@ var _ = fmt.Printf
 // ****************************
 // *****  CONST ENUM **********
 // ****************************
-const conflictNotFound = 0
 const defaultInstancesLength = 1024
-
+const conflictNotFound = data.ConflictNotFound
 // actions
 const (
 	noAction uint8 = iota + 1
@@ -69,6 +68,7 @@ func (r *Replica) fastQuorum() int {
 	}
 	return int(r.Size - 2)
 }
+
 func (r *Replica) quorum() int {
 	return int(r.Size / 2)
 }
