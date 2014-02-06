@@ -377,8 +377,7 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
 		}
-		i.revertToFormerStatus(content)
-		return i.handlePrepare(content)
+		return i.revertAndHandlePrepare(content)
 	case *data.PrepareReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return noAction, nil
@@ -498,7 +497,6 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	}
 	// pre-accept-ok for possible fast quorum commit
 	return replyAction, &data.PreAcceptOk{
-		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 	}
 }
@@ -671,10 +669,11 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 	return noAction, nil
 }
 
-func (i *Instance) revertToFormerStatus(p *data.Prepare) {
+func (i *Instance) revertAndHandlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
 	i.checkStatus(preparing)
 	i.status = i.recoveryInfo.formerStatus
 	i.ballot = i.recoveryInfo.formerBallot
+	return i.handlePrepare(p)
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
@@ -766,22 +765,20 @@ func (i *Instance) updateRecoveryInstance(p *data.PrepareReply) {
 	}
 }
 
-func (i *Instance) updateRecoveryInfo(p *data.PrepareReply) {
-	ir := i.recoveryInfo
-
-	if p.Cmds != nil {
-		ir.cmds = p.Cmds
+func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
+	if r.cmds == nil && p.Cmds != nil {
+		r.cmds = p.Cmds
 	}
-	ir.seq, ir.deps = p.Seq, p.Deps
-	ir.ballot = p.Ballot
-	ir.status = p.Status
+	r.seq, r.deps = p.Seq, p.Deps
+	r.ballot = p.Ballot
+	r.status = p.Status
 }
 
 func (i *Instance) handleCommittedPrepareReply(p *data.PrepareReply) {
 	if i.recoveryInfo.statusIs(committed) {
 		return
 	}
-	i.updateRecoveryInfo(p)
+	i.recoveryInfo.updateByPrepareReply(p)
 }
 
 func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
@@ -791,7 +788,7 @@ func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 
 	if ir.statusIsBefore(accepted) {
-		i.updateRecoveryInfo(p)
+		ir.updateByPrepareReply(p)
 		return
 	}
 
@@ -803,7 +800,7 @@ func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
 		panic("")
 	}
 
-	i.updateRecoveryInfo(p)
+	ir.updateByPrepareReply(p)
 }
 
 func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
@@ -813,7 +810,7 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 
 	if ir.statusIsBefore(preAccepted) {
-		i.updateRecoveryInfo(p)
+		ir.updateByPrepareReply(p)
 		if p.Ballot.IsInitialBallot() && !p.IsFromLeader {
 			ir.identicalCount = 1
 		}
@@ -826,8 +823,9 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 
 	if ir.ballot.Compare(p.Ballot) < 0 {
 		// Obviously, p.Ballot is not initial ballot,
-		// so we don't count it to identicalCount.
-		i.updateRecoveryInfo(p)
+		// in this case, we won't send accept next.
+		ir.updateByPrepareReply(p)
+		ir.identicalCount = 1
 		return
 	}
 
@@ -853,11 +851,9 @@ func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
 	case committed:
 		i.enterCommitted()
 		msg = i.makeCommit()
-
 	case accepted:
 		i.enterAcceptedAsSender()
 		msg = i.makeAccept()
-
 	case preAccepted:
 		// if former leader committed on fast-path,
 		// then we must send accept instead of pre-accept
@@ -873,7 +869,6 @@ func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
 		// get ready to send Accept for No-op
 		i.enterAcceptedAsSender()
 		msg = i.makeAccept()
-
 	default:
 		panic("")
 	}

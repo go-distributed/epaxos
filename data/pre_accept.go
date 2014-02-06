@@ -9,8 +9,9 @@ type PreAccept struct {
 	Ballot     *Ballot
 }
 
+// we don't need ReplicaId in PreAcceptOk,
+// because only the leader will receive this message.
 type PreAcceptOk struct {
-	ReplicaId  uint8
 	InstanceId uint64
 }
 
