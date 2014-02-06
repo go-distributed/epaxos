@@ -12,6 +12,8 @@ package replica
 // @decision (02/01/14):
 // - Executed won't be included in instance statuses anymore.
 // - Executed will be recorded in a flag. This will simplify the state machine.
+// @decision (02/05/14):
+// - No-op == Commands(nil)
 
 import (
 	"fmt"
@@ -61,13 +63,15 @@ type InstanceInfo struct {
 	acceptCount    int
 }
 
+// recovery info will keep information of the instance info that we will send out on
+// the next stage.
 type RecoveryInfo struct {
 	preAcceptedCount int
 	replyCount       int
-	maxBallot        *data.Ballot
-	ballot           *data.Ballot
+	ballot           *data.Ballot // for book keeping
 
 	cmds         data.Commands
+	seq          uint32
 	deps         data.Dependencies
 	status       uint8
 	formerStatus uint8
@@ -98,8 +102,7 @@ func NewInstanceInfo() *InstanceInfo {
 
 func NewRecoveryInfo() *RecoveryInfo {
 	return &RecoveryInfo{
-		maxBallot: data.NewBallot(0, 0, 0),
-		ballot:    data.NewBallot(0, 0, 0),
+		ballot: data.NewBallot(0, 0, 0),
 	}
 }
 
@@ -118,6 +121,35 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 	return i.status >= status
 }
 
+func (r *RecoveryInfo) isBeforeStatus(status uint8) bool {
+	return r.status < status
+}
+
+func (r *RecoveryInfo) isAtStatus(status uint8) bool {
+	return r.status == status
+}
+
+// return true if updated, false if not
+//
+// if status is higher than r.status, then update both the ballot and status.
+// if status is equal to r.status, then update the ballot only when ballot is larger than r.ballot
+//
+func (r *RecoveryInfo) updateRecoveryStatusAndBallot(status uint8, ballot *data.Ballot) bool {
+	// refresh the ballot if we enter a higher status
+	if r.isBeforeStatus(status) {
+		r.status = status
+		r.ballot = ballot
+		return true
+	}
+
+	// update the ballot
+	if r.isAtStatus(status) && ballot.Compare(r.ballot) > 0 {
+		r.ballot = ballot
+		return true
+	}
+	return false
+}
+
 func (i *Instance) freshlyCreated() bool {
 	return i.ballot.Epoch() == 0
 }
@@ -133,9 +165,12 @@ func (i *InstanceInfo) reset() {
 }
 
 func (i *Instance) initRecoveryInfo() {
+	// do not touch recoveryInfo.ballot, keep it all zeros
+	if i.recoveryInfo.ballot.Compare(data.NewBallot(0, 0, 0)) != 0 {
+		panic("")
+	}
+
 	i.recoveryInfo.replyCount = 0
-	i.recoveryInfo.ballot = i.ballot
-	i.recoveryInfo.maxBallot = i.ballot
 	i.recoveryInfo.cmds = i.cmds
 	i.recoveryInfo.deps = i.deps
 	i.recoveryInfo.status = i.status
@@ -146,6 +181,7 @@ func (i *Instance) initRecoveryInfo() {
 	} else {
 		i.recoveryInfo.preAcceptedCount = 1
 	}
+	i.recoveryInfo.replyCount = 1
 }
 
 // ******************************
@@ -599,7 +635,7 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 	}
 
 	// negative reply
-	if i.ballot.Compare(a.Ballot) < 0 {
+	if a.Ballot.Compare(i.ballot) > 0 {
 
 		// [*] there may be stale but large ballots,
 		// if we receive such ballots, that means there may be another newer proposer,
@@ -685,8 +721,158 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg Message) {
 	// if the reply has larger ballot, then we can step down
 	//ri := i.recoveryInfo
-	panic("")
 
+	if !i.isAtStatus(preparing) {
+		panic("")
+	}
+
+	if p.Ballot.Compare(i.ballot) < 0 {
+		panic("")
+	}
+
+	// negative reply
+	if p.Ballot.Compare(i.ballot) > 0 {
+
+		// [*] there may be stale but large ballots,
+		// if we receive such ballots, that means there may be another newer proposer,
+		// so we'd better step down by increasing our own ballot so we can ignore
+		// the following replies.
+		if p.Ok {
+			panic("")
+		}
+		i.ballot = p.Ballot
+		return noAction, nil
+	}
+
+	// handle the message
+	switch p.Status {
+	case committed:
+		i.prepareReplyCommittedHelper(p)
+	case accepted:
+		i.prepareReplyAcceptedHelper(p)
+	case preAccepted:
+		i.prepareReplyPreAcceptedHelper(p)
+	case nilStatus:
+		i.prepareReplyNilStatusHelper(p)
+	default:
+		panic("")
+	}
+
+	// jump to next status on receiving enough replies >= (N/2 + 1) including sender
+	i.recoveryInfo.replyCount++
+	if i.recoveryInfo.replyCount >= i.replica.quorum()+1 {
+		return i.makeRecoveryDecision()
+	}
+
+	// not enough replies
+	return noAction, nil
+}
+
+// after calling this funciton, i.status reflects the decision we made
+func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
+	// [*] Here if i.recoveryInfo.cmds == nil, then it means
+	// 1, none of the replies has cmds.
+	// 2, i.cmds == nil, because in initRecovryInfo, i.recoveryInfo.cmds
+	//    is set to i.cmds.
+	// So, it's safe to set i.cmds to i.recoveryInfo.cmds here.
+	//
+	// Same for seq and deps
+	//
+	i.cmds = i.recoveryInfo.cmds
+	i.seq = i.recoveryInfo.seq
+	i.deps = i.recoveryInfo.deps
+
+	// determine status
+	switch i.recoveryInfo.status {
+	case committed:
+		i.enterCommitted()
+		return broadcastAction, i.makeCommit()
+	case accepted:
+		i.enterAcceptedAsSender()
+		return broadcastAction, i.makeAccept()
+	case preAccepted:
+		// test if we have received enough valid preAccept replies
+		if i.recoveryInfo.preAcceptedCount >= i.replica.quorum() {
+			// if former leader committed on fast-path,
+			// then we must send accept instead of pre-accept
+			i.enterAcceptedAsSender()
+			return broadcastAction, i.makeAccept()
+		} else {
+			i.enterPreAcceptedAsSender()
+			return broadcastAction, i.makePreAccept()
+		}
+	case nilStatus:
+		// get ready to send Accept for No-op
+		i.enterAcceptedAsSender()
+		return broadcastAction, i.makeAccept()
+	default:
+		panic("")
+	}
+}
+
+// helpers for handling prepareReply
+func (i *Instance) prepareReplyCommittedHelper(p *data.PrepareReply) {
+	i.status, i.recoveryInfo.seq, i.recoveryInfo.deps = p.Status, p.Seq, p.Deps
+	if p.Cmds != nil {
+		i.recoveryInfo.cmds = p.Cmds
+	}
+}
+
+// Assumptions:
+// p.Deps must be non-zeros
+func (i *Instance) prepareReplyAcceptedHelper(p *data.PrepareReply) {
+	if p.Deps.IsInitialDependencies() {
+		panic("")
+	}
+
+	// record the info of the newest accepted reply
+	needUpdate := i.recoveryInfo.updateRecoveryStatusAndBallot(p.Status, p.Ballot)
+	if needUpdate {
+		i.recoveryInfo.seq, i.recoveryInfo.deps = p.Seq, p.Deps
+		if p.Cmds != nil {
+			i.recoveryInfo.cmds = p.Cmds
+		}
+	}
+}
+
+// Assumptions:
+// 1, recoveryinfo.ballot = all zeros if and only if
+// the instance's former status = nilStatus.
+// 2, the deps in reply must be non-zeros.
+//
+// So there is at most one time that i.recoveryInfo.deps be all zeros when
+// calling IsConflictWith.
+func (i *Instance) prepareReplyPreAcceptedHelper(p *data.PrepareReply) {
+	if p.Deps.IsInitialDependencies() {
+		panic("")
+	}
+
+	var ok bool
+	if i.recoveryInfo.deps.IsInitialDependencies() {
+		if i.recoveryInfo.preAcceptedCount > 0 {
+			panic("")
+		}
+		ok = true
+	} else {
+		ok = i.recoveryInfo.deps.Same(p.Deps)
+	}
+
+	if p.Ballot.IsInitialBallot() && !p.IsFromLeader && ok {
+		i.recoveryInfo.preAcceptedCount++
+	}
+
+	// record the info of the newest pre-accepted reply
+	needUpdate := i.recoveryInfo.updateRecoveryStatusAndBallot(p.Status, p.Ballot)
+	if needUpdate {
+		i.recoveryInfo.seq, i.recoveryInfo.deps = p.Seq, p.Deps
+		if p.Cmds != nil {
+			i.recoveryInfo.cmds = p.Cmds
+		}
+	}
+}
+
+func (i *Instance) prepareReplyNilStatusHelper(p *data.PrepareReply) {
+	// do nothing
 }
 
 // checkStatus checks the status of the instance
@@ -716,6 +902,38 @@ func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencie
 		Seq:        seq,
 		Deps:       deps,
 		Ballot:     i.ballot.Clone(),
+	}
+}
+
+func (i *Instance) makePreAccept() *data.PreAccept {
+	return &data.PreAccept{
+		Cmds:       i.cmds.Clone(),
+		Seq:        i.seq,
+		Deps:       i.deps.Clone(),
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Ballot:     i.ballot.Clone(),
+	}
+}
+
+func (i *Instance) makeAccept() *data.Accept {
+	return &data.Accept{
+		Cmds:       i.cmds.Clone(),
+		Seq:        i.seq,
+		Deps:       i.deps.Clone(),
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Ballot:     i.ballot.Clone(),
+	}
+}
+
+func (i *Instance) makeCommit() *data.Commit {
+	return &data.Commit{
+		Cmds:       i.cmds, // [*] no need to clone
+		Seq:        i.seq,
+		Deps:       i.deps, // [*] no need to clone either
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
 	}
 }
 

@@ -9,6 +9,7 @@ type Prepare struct {
 
 type PrepareReply struct {
 	Ok             bool
+	IsFromLeader   bool
 	ReplicaId      uint8
 	InstanceId     uint64
 	Status         uint8

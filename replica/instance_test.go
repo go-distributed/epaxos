@@ -70,8 +70,7 @@ func commonTestlibExampleCommittedInstance() *Instance {
 }
 func commonTestlibExamplePreParingInstance() *Instance {
 	i := commonTestlibExampleInstance()
-	i.status = preparing
-	i.ballot = i.replica.makeInitialBallot()
+	i.enterPreparing()
 	return i
 }
 
@@ -90,7 +89,6 @@ func commonTestlibCloneInstance(inst *Instance) *Instance {
 		copyReceveryInfo = &RecoveryInfo{
 			preAcceptedCount: ri.preAcceptedCount,
 			replyCount:       ri.replyCount,
-			maxBallot:        ri.maxBallot.Clone(),
 			ballot:           ri.ballot.Clone(),
 			cmds:             ri.cmds.Clone(),
 			deps:             ri.deps.Clone(),
