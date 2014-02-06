@@ -18,7 +18,7 @@ var _ = fmt.Printf
 // *****  CONST ENUM **********
 // ****************************
 const defaultInstancesLength = 1024
-const conflictNotFound = data.ConflictNotFound
+const conflictNotFound = 0
 
 // actions
 const (
@@ -108,7 +108,6 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 		}
 	}
 	i.cmds, i.seq, i.deps = cmds, seq, deps
-	r.updateMaxInstanceNum(r.Id, i.id)
 }
 
 // This func updates the passed in dependencies from replica[from].
@@ -135,7 +134,6 @@ func (r *Replica) updateInstance(cmds data.Commands, seq uint32, deps data.Depen
 	}
 
 	i.cmds, i.seq, i.deps = cmds, seq, deps
-	r.updateMaxInstanceNum(from, i.id)
 	return changed
 }
 
@@ -155,9 +153,9 @@ func (r *Replica) scanConflicts(instances []*Instance, cmds data.Commands, start
 	return conflictNotFound, false
 }
 
-func (r *Replica) updateMaxInstanceNum(replicaId uint8, instanceId uint64) bool {
-	if r.MaxInstanceNum[replicaId] < instanceId {
-		r.MaxInstanceNum[replicaId] = instanceId
+func (r *Replica) updateMaxInstanceNum(rowId uint8, instanceId uint64) bool {
+	if r.MaxInstanceNum[rowId] < instanceId {
+		r.MaxInstanceNum[rowId] = instanceId
 		return true
 	}
 	return false

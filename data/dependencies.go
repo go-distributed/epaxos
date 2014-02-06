@@ -2,8 +2,6 @@ package data
 
 type Dependencies []uint64
 
-const ConflictNotFound = 0
-
 // union unions the deps into the receiver
 // return true if deps are same
 func (d Dependencies) Union(other Dependencies) bool {
@@ -40,25 +38,8 @@ func (d Dependencies) Same(other Dependencies) bool {
 		panic("Same: different size!")
 	}
 
-	if d.IsInitialDependencies() || other.IsInitialDependencies() {
-		panic("Same: found all zero dependencies")
-	}
-
 	for i := range d {
 		if d[i] != other[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func (d Dependencies) IsInitialDependencies() bool {
-	if len(d) == 0 {
-		panic("IsInitialDependencies: zero length")
-	}
-
-	for i := range d {
-		if d[i] != ConflictNotFound {
 			return false
 		}
 	}

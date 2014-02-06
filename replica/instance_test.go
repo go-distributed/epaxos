@@ -33,7 +33,7 @@ func commonTestlibUnionedDeps() data.Dependencies {
 
 func commonTestlibExampleInstance() *Instance {
 	r := New(0, 5, new(test.DummySM))
-	i := NewInstance(r, conflictNotFound+1)
+	i := NewInstance(r, 0, conflictNotFound+1)
 	i.cmds = data.Commands{
 		data.Command("world"),
 	}
@@ -48,7 +48,7 @@ func commonTestlibExampleInstance() *Instance {
 
 func commonTestlibExampleNilStatusInstance() *Instance {
 	r := New(0, 5, new(test.DummySM))
-	return NewInstance(r, conflictNotFound+1)
+	return NewInstance(r, 0, conflictNotFound+1)
 }
 func commonTestlibExamplePreAcceptedInstance() *Instance {
 	i := commonTestlibExampleInstance()
@@ -82,18 +82,19 @@ func commonTestlibCloneInstance(inst *Instance) *Instance {
 		acceptCount:    inst.info.acceptCount,
 	}
 
-	ri := inst.recoveryInfo
+	ir := inst.recoveryInfo
 
 	copyReceveryInfo := NewRecoveryInfo()
 	if inst.status == preparing {
 		copyReceveryInfo = &RecoveryInfo{
-			preAcceptedCount: ri.preAcceptedCount,
-			replyCount:       ri.replyCount,
-			ballot:           ri.ballot.Clone(),
-			cmds:             ri.cmds.Clone(),
-			deps:             ri.deps.Clone(),
-			status:           ri.status,
-			formerStatus:     ri.formerStatus,
+			identicalCount: ir.identicalCount,
+			replyCount:     ir.replyCount,
+			ballot:         ir.ballot.Clone(),
+			cmds:           ir.cmds.Clone(),
+			deps:           ir.deps.Clone(),
+			status:         ir.status,
+			formerStatus:   ir.formerStatus,
+			formerBallot:   ir.formerBallot,
 		}
 	}
 
@@ -115,8 +116,9 @@ func TestNewInstance(t *testing.T) {
 	expectedReplicaId := uint8(0)
 	expectedInstanceId := uint64(1)
 	r := New(expectedReplicaId, 5, new(test.DummySM))
-	i := NewInstance(r, expectedInstanceId)
+	i := NewInstance(r, expectedReplicaId, expectedInstanceId)
 	assert.Equal(t, i.replica.Id, expectedReplicaId)
+	assert.Equal(t, i.rowId, expectedReplicaId)
 	assert.Equal(t, i.id, expectedInstanceId)
 	assert.Equal(t, i.deps, i.replica.makeInitialDeps())
 }
@@ -455,7 +457,8 @@ func TestPreAcceptedProcessWithHandlePrepare(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.PrepareReply{
 		Ok:             true,
-		ReplicaId:      inst.replica.Id,
+		IsFromLeader:   true,
+		ReplicaId:      inst.rowId,
 		InstanceId:     inst.id,
 		Status:         preAccepted,
 		Seq:            inst.seq,
@@ -863,7 +866,8 @@ func TestAcceptedProcessWithHandlePrepare(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, msg, &data.PrepareReply{
 		Ok:             true,
-		ReplicaId:      inst.replica.Id,
+		IsFromLeader:   true,
+		ReplicaId:      inst.rowId,
 		InstanceId:     inst.id,
 		Status:         accepted,
 		Seq:            inst.seq,
@@ -1083,13 +1087,14 @@ func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 
 	// send a Prepare message to it
 	expectedReply := &data.PrepareReply{
-		Ok:         true,
-		ReplicaId:  inst.replica.Id,
-		InstanceId: inst.id,
-		Status:     committed,
-		Cmds:       inst.cmds,
-		Seq:        inst.seq,
-		Deps:       inst.deps,
+		Ok:           true,
+		ReplicaId:    inst.rowId,
+		IsFromLeader: true,
+		InstanceId:   inst.id,
+		Status:       committed,
+		Cmds:         inst.cmds,
+		Seq:          inst.seq,
+		Deps:         inst.deps,
 	}
 	p := &data.Prepare{
 		NeedCmdsInReply: true,
@@ -1259,7 +1264,8 @@ func TestHandlePrepare(t *testing.T) {
 		Deps:           i.deps.Clone(),
 		Ballot:         largerBallot,
 		OriginalBallot: smallerBallot,
-		ReplicaId:      i.replica.Id,
+		ReplicaId:      i.rowId,
+		IsFromLeader:   true,
 		InstanceId:     i.id,
 	})
 
@@ -1279,6 +1285,9 @@ func TestHandlePrepare(t *testing.T) {
 // besides, the instances' status is set to commited.
 // on failure: otherwise
 func TestHandleCommit(t *testing.T) {
+}
+
+func TestHandlePrepareReply(t *testing.T) {
 }
 
 // TestCheckStatus tests the behaviour of checkStatus,

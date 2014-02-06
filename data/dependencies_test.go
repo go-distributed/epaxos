@@ -72,6 +72,6 @@ func TestDependenciesSame(t *testing.T) {
 	}
 	assert.False(t, self.Same(other))
 
-	other = make(Dependencies, 5)
+	other = make(Dependencies, 4)
 	assert.Panics(t, func() { self.Same(other) })
 }

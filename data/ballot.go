@@ -97,6 +97,9 @@ func (b *Ballot) IsInitialBallot() bool {
 }
 
 func (b *Ballot) Clone() *Ballot {
+	if b == nil {
+		panic("")
+	}
 	return &Ballot{
 		b.epoch,
 		b.number,
