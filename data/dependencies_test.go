@@ -58,3 +58,20 @@ func TestDependenciesNilPanic(t *testing.T) {
 	d = nil
 	assert.Panics(t, func() { d.Clone() })
 }
+
+func TestDependenciesSame(t *testing.T) {
+	self := make(Dependencies, 5)
+	for i := range self {
+		self[i] = uint64(i)
+	}
+	other := self.Clone()
+	assert.True(t, self.Same(other))
+
+	for i := range other {
+		other[i] = uint64(len(other) - i)
+	}
+	assert.False(t, self.Same(other))
+
+	other = make(Dependencies, 4)
+	assert.Panics(t, func() { self.Same(other) })
+}

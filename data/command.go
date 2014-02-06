@@ -8,8 +8,6 @@ type Command []byte
 
 type Commands []Command
 
-var NilCommands Commands = Commands{}
-
 func (self Command) Compare(other Command) int {
 	return bytes.Compare(self, other)
 }
