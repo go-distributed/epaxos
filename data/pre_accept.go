@@ -10,6 +10,7 @@ type PreAccept struct {
 }
 
 type PreAcceptOk struct {
+	ReplicaId  uint8
 	InstanceId uint64
 }
 

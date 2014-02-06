@@ -40,11 +40,11 @@ func depsTestSetupReplica() (r *Replica, i *Instance) {
 	r = New(4, 5, new(test.DummySM))
 	for i := 0; i < 5; i++ {
 		r.MaxInstanceNum[i] = uint64(conflictNotFound + 1 + uint64(i))
-		instance := NewInstance(r, conflictNotFound+1+uint64(i))
+		instance := NewInstance(r, r.Id, conflictNotFound+1+uint64(i))
 		instance.cmds = commonTestlibExampleCommands().Clone()
 		r.InstanceMatrix[i][instance.id] = instance
 	}
-	i = NewInstance(r, 6)
+	i = NewInstance(r, r.Id, 6)
 	return
 }
 

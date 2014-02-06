@@ -52,6 +52,7 @@ type Instance struct {
 
 	// local information
 	replica  *Replica
+	rowId    uint8
 	id       uint64
 	executed bool
 }
@@ -77,16 +78,18 @@ type RecoveryInfo struct {
 	deps         data.Dependencies
 	status       uint8
 	formerStatus uint8
+	formerBallot *data.Ballot
 }
 
 // ****************************
 // **** NEW INSTANCE **********
 // ****************************
 
-func NewInstance(replica *Replica, instanceId uint64) (i *Instance) {
+func NewInstance(replica *Replica, rowId uint8, instanceId uint64) (i *Instance) {
 	i = &Instance{
 		replica:      replica,
 		id:           instanceId,
+		rowId:        rowId,
 		deps:         replica.makeInitialDeps(),
 		info:         NewInstanceInfo(),
 		recoveryInfo: NewRecoveryInfo(),
@@ -130,6 +133,7 @@ func (r *RecoveryInfo) statusIsBefore(status uint8) bool {
 func (r *RecoveryInfo) statusIs(status uint8) bool {
 	return r.status == status
 }
+
 func (r *RecoveryInfo) statusIsAfter(status uint8) bool {
 	return r.status > status
 }
@@ -159,9 +163,10 @@ func (i *Instance) initRecoveryInfo() {
 	i.recoveryInfo.deps = i.deps
 	i.recoveryInfo.status = i.status
 	i.recoveryInfo.formerStatus = i.status
+	i.recoveryInfo.formerBallot = i.ballot
 
 	// preacceptcount is used to count N/2 identical initial preaccepts.
-	if i.isAtStatus(preAccepted) && i.ballot.IsInitialBallot() {
+	if i.isAtStatus(preAccepted) && i.ballot.IsInitialBallot() && i.rowId != i.replica.Id {
 		i.recoveryInfo.identicalCount = 1
 	} else {
 		i.recoveryInfo.identicalCount = 0
@@ -192,19 +197,19 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handlePropose(content)
 	case *data.PreAccept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPreAccept(content.ReplicaId)
+			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectAccept(content.ReplicaId)
+			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare(content.ReplicaId)
+			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
 	case *data.PrepareReply:
@@ -232,19 +237,19 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	switch content := m.Content().(type) {
 	case *data.PreAccept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPreAccept(content.ReplicaId)
+			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectAccept(content.ReplicaId)
+			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare(content.ReplicaId)
+			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply:
@@ -285,17 +290,17 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 
 	switch content := m.Content().(type) {
 	case *data.PreAccept:
-		return i.rejectPreAccept(content.ReplicaId)
+		return i.rejectPreAccept()
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectAccept(content.ReplicaId)
+			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare(content.ReplicaId)
+			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
 	case *data.AcceptReply:
@@ -328,9 +333,9 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 
 	switch content := m.Content().(type) {
 	case *data.PreAccept:
-		return i.rejectPreAccept(content.ReplicaId)
+		return i.rejectPreAccept()
 	case *data.Accept:
-		return i.rejectAccept(content.ReplicaId)
+		return i.rejectAccept()
 	case *data.Prepare:
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
@@ -353,12 +358,12 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 	switch content := m.Content().(type) {
 	case *data.PreAccept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPreAccept(content.ReplicaId)
+			return i.rejectPreAccept()
 		}
 		return i.handlePreAccept(content)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectAccept(content.ReplicaId)
+			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
 	case *data.Commit:
@@ -370,9 +375,10 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			panic("")
 		}
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare(content.ReplicaId)
+			return i.rejectPrepare()
 		}
-		return i.revertPrepare(content)
+		i.revertToFormerStatus(content)
+		return i.handlePrepare(content)
 	case *data.PrepareReply:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return noAction, nil
@@ -413,20 +419,20 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 // - ok : false
 // - Ballot: self (ballot)
 // - Ids
-func (i *Instance) rejectPreAccept(replicaId uint8) (action uint8, reply *data.PreAcceptReply) {
-	return replyAction, i.makePreAcceptReply(replicaId, false, 0, nil)
+func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) {
+	return replyAction, i.makePreAcceptReply(false, 0, nil)
 }
 
 // rejectAccept rejects the Accept request with a AcceptReply:
 // - Ok: false
 // - Ballot: self.ballot
-// - ReplicaId: self.replica.id
+// - ReplicaId: self.rowId
 // - InstanceId: self.id
 // - other fields: undefined
-func (i *Instance) rejectAccept(replicaId uint8) (action uint8, reply *data.AcceptReply) {
+func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
 	return replyAction, &data.AcceptReply{
 		Ok:         false,
-		ReplicaId:  replicaId,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
 	}
@@ -436,10 +442,10 @@ func (i *Instance) rejectAccept(replicaId uint8) (action uint8, reply *data.Acce
 // - ok : false
 // - Ballot: self (ballot)
 // - relevant Ids
-func (i *Instance) rejectPrepare(replicaId uint8) (action uint8, reply *data.PrepareReply) {
+func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 	return replyAction, &data.PrepareReply{
 		Ok:         false,
-		ReplicaId:  replicaId,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
 	}
@@ -461,7 +467,7 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 	i.enterPreAcceptedAsSender()
 
 	return fastQuorumAction, &data.PreAccept{
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       p.Cmds.Clone(),
 		Seq:        i.seq,
@@ -481,17 +487,18 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 
 	i.enterPreAcceptedAsReceiver()
 	i.ballot = p.Ballot
-	changed := i.replica.updateInstance(p.Cmds, p.Seq, p.Deps, p.ReplicaId, i)
+	changed := i.replica.updateInstance(p.Cmds, p.Seq, p.Deps, i.rowId, i)
 
 	if changed {
-		return replyAction, i.makePreAcceptReply(p.ReplicaId, true, i.seq, i.deps)
+		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
 	}
 	// not initial leader
 	if !p.Ballot.IsInitialBallot() {
-		return replyAction, i.makePreAcceptReply(p.ReplicaId, true, i.seq, i.deps)
+		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
 	}
 	// pre-accept-ok for possible fast quorum commit
 	return replyAction, &data.PreAcceptOk{
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 	}
 }
@@ -561,7 +568,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
 			Deps:       i.deps.Clone(),
-			ReplicaId:  p.ReplicaId,
+			ReplicaId:  i.rowId,
 			InstanceId: i.id,
 		}
 	} else if i.info.preAcceptCount >= i.replica.quorum() && !i.ableToFastPath() {
@@ -572,7 +579,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
 			Deps:       i.deps.Clone(),
-			ReplicaId:  p.ReplicaId,
+			ReplicaId:  i.rowId,
 			InstanceId: i.id,
 			Ballot:     i.ballot.Clone(),
 		}
@@ -600,7 +607,7 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 
 	return replyAction, &data.AcceptReply{
 		Ok:         true,
-		ReplicaId:  a.ReplicaId,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
 	}
@@ -643,7 +650,7 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
 			Deps:       i.deps.Clone(),
-			ReplicaId:  a.ReplicaId,
+			ReplicaId:  i.rowId,
 			InstanceId: i.id,
 		}
 	}
@@ -664,10 +671,10 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 	return noAction, nil
 }
 
-func (i *Instance) revertPrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
+func (i *Instance) revertToFormerStatus(p *data.Prepare) {
 	i.checkStatus(preparing)
 	i.status = i.recoveryInfo.formerStatus
-	return i.handlePrepare(p)
+	i.ballot = i.recoveryInfo.formerBallot
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
@@ -691,13 +698,13 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 	}
 
 	isFromLeader := false
-	if i.replica.Id == p.ReplicaId {
+	if i.replica.Id == i.rowId {
 		isFromLeader = true
 	}
 
 	return replyAction, &data.PrepareReply{
 		Ok:             true,
-		ReplicaId:      p.ReplicaId,
+		ReplicaId:      i.rowId,
 		InstanceId:     i.id,
 		Status:         i.status,
 		Seq:            i.seq,
@@ -759,22 +766,22 @@ func (i *Instance) updateRecoveryInstance(p *data.PrepareReply) {
 	}
 }
 
-func (i *Instance) updateRecoveryInfo(
-	cmds data.Commands, seq uint32, deps data.Dependencies,
-	ballot *data.Ballot, status uint8,
-) {
+func (i *Instance) updateRecoveryInfo(p *data.PrepareReply) {
 	ir := i.recoveryInfo
 
-	ir.cmds, ir.seq, ir.deps = cmds, seq, deps
-	ir.ballot = ballot
-	ir.status = status
+	if p.Cmds != nil {
+		ir.cmds = p.Cmds
+	}
+	ir.seq, ir.deps = p.Seq, p.Deps
+	ir.ballot = p.Ballot
+	ir.status = p.Status
 }
 
 func (i *Instance) handleCommittedPrepareReply(p *data.PrepareReply) {
 	if i.recoveryInfo.statusIs(committed) {
 		return
 	}
-	i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, committed)
+	i.updateRecoveryInfo(p)
 }
 
 func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
@@ -784,7 +791,7 @@ func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 
 	if ir.statusIsBefore(accepted) {
-		i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, accepted)
+		i.updateRecoveryInfo(p)
 		return
 	}
 
@@ -796,7 +803,7 @@ func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
 		panic("")
 	}
 
-	i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, accepted)
+	i.updateRecoveryInfo(p)
 }
 
 func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
@@ -806,8 +813,8 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 
 	if ir.statusIsBefore(preAccepted) {
-		i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, preAccepted)
-		if p.Ballot.IsInitialBallot() && !p.IsFromLeader{
+		i.updateRecoveryInfo(p)
+		if p.Ballot.IsInitialBallot() && !p.IsFromLeader {
 			ir.identicalCount = 1
 		}
 		return
@@ -816,9 +823,11 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 	if ir.ballot.Compare(p.Ballot) > 0 {
 		return
 	}
+
 	if ir.ballot.Compare(p.Ballot) < 0 {
-		i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, preAccepted)
-		ir.identicalCount = 1
+		// Obviously, p.Ballot is not initial ballot,
+		// so we don't count it to identicalCount.
+		i.updateRecoveryInfo(p)
 		return
 	}
 
@@ -828,38 +837,42 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 }
 
-func (i *Instance) moveRecoveryToSelf() {
+func (i *Instance) loadRecoveryInfo() {
 	ir := i.recoveryInfo
-	i.cmds, i.seq, i.deps, i.ballot = ir.cmds, ir.seq, ir.deps, ir.ballot
-	i.status = ir.status
+	i.cmds, i.seq, i.deps = ir.cmds, ir.seq, ir.deps
+	i.ballot, i.status = ir.ballot, ir.status
 }
 
 // TODO: Make up the message of returned!
 func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
-	i.moveRecoveryToSelf()
+	i.loadRecoveryInfo()
 
 	ir := i.recoveryInfo
 	// determine status
 	switch ir.status {
 	case committed:
 		i.enterCommitted()
+		msg = i.makeCommit()
 
 	case accepted:
 		i.enterAcceptedAsSender()
+		msg = i.makeAccept()
 
 	case preAccepted:
 		// if former leader committed on fast-path,
 		// then we must send accept instead of pre-accept
-		if ir.identicalCount == i.replica.quorum() {
+		if ir.identicalCount >= i.replica.quorum() {
 			i.enterAcceptedAsSender()
+			msg = i.makeAccept()
 
 		} else {
 			i.enterPreAcceptedAsSender()
-
+			msg = i.makePreAccept()
 		}
 	case nilStatus:
 		// get ready to send Accept for No-op
 		i.enterAcceptedAsSender()
+		msg = i.makeAccept()
 
 	default:
 		panic("")
@@ -872,10 +885,10 @@ func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
 // ******* Make Message *******
 // ****************************
 
-func (i *Instance) makePreAcceptReply(replicaId uint8, ok bool, seq uint32, deps data.Dependencies) *data.PreAcceptReply {
+func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencies) *data.PreAcceptReply {
 	return &data.PreAcceptReply{
 		Ok:         ok,
-		ReplicaId:  replicaId,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Seq:        seq,
 		Deps:       deps,
@@ -883,9 +896,9 @@ func (i *Instance) makePreAcceptReply(replicaId uint8, ok bool, seq uint32, deps
 	}
 }
 
-func (i *Instance) makePreAccept(replicaId uint8) *data.PreAccept {
+func (i *Instance) makePreAccept() *data.PreAccept {
 	return &data.PreAccept{
-		ReplicaId:  replicaId,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       i.cmds.Clone(),
 		Seq:        i.seq,
@@ -894,9 +907,9 @@ func (i *Instance) makePreAccept(replicaId uint8) *data.PreAccept {
 	}
 }
 
-func (i *Instance) makeAccept(replicaId uint8) *data.Accept {
+func (i *Instance) makeAccept() *data.Accept {
 	return &data.Accept{
-		ReplicaId:  replicaId,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       i.cmds.Clone(),
 		Seq:        i.seq,
@@ -905,9 +918,9 @@ func (i *Instance) makeAccept(replicaId uint8) *data.Accept {
 	}
 }
 
-func (i *Instance) makeCommit(replicaId uint8) *data.Commit {
+func (i *Instance) makeCommit() *data.Commit {
 	return &data.Commit{
-		ReplicaId:  replicaId,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       i.cmds, // [*] no need to clone
 		Seq:        i.seq,
