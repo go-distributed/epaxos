@@ -82,18 +82,18 @@ func commonTestlibCloneInstance(inst *Instance) *Instance {
 		acceptCount:    inst.info.acceptCount,
 	}
 
-	ri := inst.recoveryInfo
+	ir := inst.recoveryInfo
 
 	copyReceveryInfo := NewRecoveryInfo()
 	if inst.status == preparing {
 		copyReceveryInfo = &RecoveryInfo{
-			preAcceptedCount: ri.preAcceptedCount,
-			replyCount:       ri.replyCount,
-			ballot:           ri.ballot.Clone(),
-			cmds:             ri.cmds.Clone(),
-			deps:             ri.deps.Clone(),
-			status:           ri.status,
-			formerStatus:     ri.formerStatus,
+			identicalCount: ir.identicalCount,
+			replyCount:     ir.replyCount,
+			ballot:         ir.ballot.Clone(),
+			cmds:           ir.cmds.Clone(),
+			deps:           ir.deps.Clone(),
+			status:         ir.status,
+			formerStatus:   ir.formerStatus,
 		}
 	}
 
@@ -1191,7 +1191,7 @@ func TestRejections(t *testing.T) {
 	inst.ballot = expectedBallot.Clone()
 
 	// reject with PreAcceptReply
-	action, par := inst.rejectPreAccept()
+	action, par := inst.rejectPreAccept(inst.replica.Id)
 	assert.Equal(t, action, replyAction)
 
 	assert.True(t, assert.ObjectsAreEqual(par, &data.PreAcceptReply{
@@ -1202,7 +1202,7 @@ func TestRejections(t *testing.T) {
 	}))
 
 	// reject with AcceptReply
-	action, ar := inst.rejectAccept()
+	action, ar := inst.rejectAccept(inst.replica.Id)
 	assert.Equal(t, action, replyAction)
 
 	assert.True(t, assert.ObjectsAreEqual(ar, &data.AcceptReply{
@@ -1213,7 +1213,7 @@ func TestRejections(t *testing.T) {
 	}))
 
 	// reject with PrepareReply
-	action, ppr := inst.rejectPrepare()
+	action, ppr := inst.rejectPrepare(inst.replica.Id)
 	assert.Equal(t, action, replyAction)
 	assert.True(t, assert.ObjectsAreEqual(ppr, &data.PrepareReply{
 		Ok:         false,
@@ -1279,6 +1279,9 @@ func TestHandlePrepare(t *testing.T) {
 // besides, the instances' status is set to commited.
 // on failure: otherwise
 func TestHandleCommit(t *testing.T) {
+}
+
+func TestHandlePrepareReply(t *testing.T) {
 }
 
 // TestCheckStatus tests the behaviour of checkStatus,

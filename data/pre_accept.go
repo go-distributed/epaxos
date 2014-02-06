@@ -1,11 +1,11 @@
 package data
 
 type PreAccept struct {
+	ReplicaId  uint8
+	InstanceId uint64
 	Cmds       Commands
 	Seq        uint32
 	Deps       Dependencies
-	ReplicaId  uint8
-	InstanceId uint64
 	Ballot     *Ballot
 }
 
@@ -15,10 +15,10 @@ type PreAcceptOk struct {
 
 type PreAcceptReply struct {
 	Ok         bool
-	Seq        uint32
-	Deps       Dependencies
 	ReplicaId  uint8
 	InstanceId uint64
+	Seq        uint32
+	Deps       Dependencies
 	Ballot     *Ballot
 }
 

@@ -16,6 +16,16 @@ We are documenting directories description here.
 
   The epaxos replica module.
 
-* **command/**
+* **data/**
 
-  Command and State machine relevant module.
+  Message, commands and other related data module.
+
+* **test/**
+
+  Testing infrastructure.
+
+* **doc/**
+
+  General concepts explanation and blue print documentation.
+  For detailed documentation, please refer to individual moduel and files.
+

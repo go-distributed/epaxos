@@ -66,16 +66,17 @@ type InstanceInfo struct {
 // recovery info will keep information of the instance info that we will send out on
 // the next stage.
 type RecoveryInfo struct {
-	preAcceptedCount int
-	replyCount       int
-	ballot           *data.Ballot // for book keeping
+	// This is used to store the identical non original leader pre-accept replies.
+	identicalCount int
 
-	cmds                      data.Commands
-	seq                       uint32
-	deps                      data.Dependencies
-	status                    uint8
-	formerStatus              uint8
-	formerLeaderWasOnFastPath bool
+	replyCount int
+	ballot     *data.Ballot // for book keeping
+
+	cmds         data.Commands
+	seq          uint32
+	deps         data.Dependencies
+	status       uint8
+	formerStatus uint8
 }
 
 // ****************************
@@ -122,12 +123,15 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 	return i.status >= status
 }
 
-func (r *RecoveryInfo) isBeforeStatus(status uint8) bool {
+func (r *RecoveryInfo) statusIsBefore(status uint8) bool {
 	return r.status < status
 }
 
-func (r *RecoveryInfo) isAtStatus(status uint8) bool {
+func (r *RecoveryInfo) statusIs(status uint8) bool {
 	return r.status == status
+}
+func (r *RecoveryInfo) statusIsAfter(status uint8) bool {
+	return r.status > status
 }
 
 func (i *Instance) freshlyCreated() bool {
@@ -150,19 +154,18 @@ func (i *Instance) initRecoveryInfo() {
 		panic("")
 	}
 
-	i.recoveryInfo.formerLeaderWasOnFastPath = true
 	i.recoveryInfo.replyCount = 0
 	i.recoveryInfo.cmds = i.cmds
 	i.recoveryInfo.deps = i.deps
 	i.recoveryInfo.status = i.status
 	i.recoveryInfo.formerStatus = i.status
+
 	// preacceptcount is used to count N/2 identical initial preaccepts.
-	if i.isAtStatus(preAccepted) {
-		i.recoveryInfo.preAcceptedCount = 0
+	if i.isAtStatus(preAccepted) && i.ballot.IsInitialBallot() {
+		i.recoveryInfo.identicalCount = 1
 	} else {
-		i.recoveryInfo.preAcceptedCount = 1
+		i.recoveryInfo.identicalCount = 0
 	}
-	i.recoveryInfo.replyCount = 1
 }
 
 // ******************************
@@ -189,19 +192,19 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handlePropose(content)
 	case *data.PreAccept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPreAccept()
+			return i.rejectPreAccept(content.ReplicaId)
 		}
 		return i.handlePreAccept(content)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectAccept()
+			return i.rejectAccept(content.ReplicaId)
 		}
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare()
+			return i.rejectPrepare(content.ReplicaId)
 		}
 		return i.handlePrepare(content)
 	case *data.PrepareReply:
@@ -229,19 +232,19 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	switch content := m.Content().(type) {
 	case *data.PreAccept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPreAccept()
+			return i.rejectPreAccept(content.ReplicaId)
 		}
 		return i.handlePreAccept(content)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectAccept()
+			return i.rejectAccept(content.ReplicaId)
 		}
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare()
+			return i.rejectPrepare(content.ReplicaId)
 		}
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply:
@@ -282,17 +285,17 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 
 	switch content := m.Content().(type) {
 	case *data.PreAccept:
-		return i.rejectPreAccept()
+		return i.rejectPreAccept(content.ReplicaId)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectAccept()
+			return i.rejectAccept(content.ReplicaId)
 		}
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare()
+			return i.rejectPrepare(content.ReplicaId)
 		}
 		return i.handlePrepare(content)
 	case *data.AcceptReply:
@@ -325,9 +328,9 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 
 	switch content := m.Content().(type) {
 	case *data.PreAccept:
-		return i.rejectPreAccept()
+		return i.rejectPreAccept(content.ReplicaId)
 	case *data.Accept:
-		return i.rejectAccept()
+		return i.rejectAccept(content.ReplicaId)
 	case *data.Prepare:
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
@@ -350,12 +353,12 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 	switch content := m.Content().(type) {
 	case *data.PreAccept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPreAccept()
+			return i.rejectPreAccept(content.ReplicaId)
 		}
 		return i.handlePreAccept(content)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectAccept()
+			return i.rejectAccept(content.ReplicaId)
 		}
 		return i.handleAccept(content)
 	case *data.Commit:
@@ -367,7 +370,7 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			panic("")
 		}
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare()
+			return i.rejectPrepare(content.ReplicaId)
 		}
 		return i.revertPrepare(content)
 	case *data.PrepareReply:
@@ -410,8 +413,8 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 // - ok : false
 // - Ballot: self (ballot)
 // - Ids
-func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) {
-	return replyAction, i.makePreAcceptReply(false, 0, nil)
+func (i *Instance) rejectPreAccept(replicaId uint8) (action uint8, reply *data.PreAcceptReply) {
+	return replyAction, i.makePreAcceptReply(replicaId, false, 0, nil)
 }
 
 // rejectAccept rejects the Accept request with a AcceptReply:
@@ -420,10 +423,10 @@ func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) 
 // - ReplicaId: self.replica.id
 // - InstanceId: self.id
 // - other fields: undefined
-func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
+func (i *Instance) rejectAccept(replicaId uint8) (action uint8, reply *data.AcceptReply) {
 	return replyAction, &data.AcceptReply{
 		Ok:         false,
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  replicaId,
 		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
 	}
@@ -433,10 +436,10 @@ func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
 // - ok : false
 // - Ballot: self (ballot)
 // - relevant Ids
-func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
+func (i *Instance) rejectPrepare(replicaId uint8) (action uint8, reply *data.PrepareReply) {
 	return replyAction, &data.PrepareReply{
 		Ok:         false,
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  replicaId,
 		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
 	}
@@ -481,11 +484,11 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	changed := i.replica.updateInstance(p.Cmds, p.Seq, p.Deps, p.ReplicaId, i)
 
 	if changed {
-		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
+		return replyAction, i.makePreAcceptReply(p.ReplicaId, true, i.seq, i.deps)
 	}
 	// not initial leader
 	if !p.Ballot.IsInitialBallot() {
-		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
+		return replyAction, i.makePreAcceptReply(p.ReplicaId, true, i.seq, i.deps)
 	}
 	// pre-accept-ok for possible fast quorum commit
 	return replyAction, &data.PreAcceptOk{
@@ -558,7 +561,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
 			Deps:       i.deps.Clone(),
-			ReplicaId:  i.replica.Id,
+			ReplicaId:  p.ReplicaId,
 			InstanceId: i.id,
 		}
 	} else if i.info.preAcceptCount >= i.replica.quorum() && !i.ableToFastPath() {
@@ -569,7 +572,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
 			Deps:       i.deps.Clone(),
-			ReplicaId:  i.replica.Id,
+			ReplicaId:  p.ReplicaId,
 			InstanceId: i.id,
 			Ballot:     i.ballot.Clone(),
 		}
@@ -597,7 +600,7 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 
 	return replyAction, &data.AcceptReply{
 		Ok:         true,
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  a.ReplicaId,
 		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
 	}
@@ -640,7 +643,7 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 			Cmds:       i.cmds.Clone(),
 			Seq:        i.seq,
 			Deps:       i.deps.Clone(),
-			ReplicaId:  i.replica.Id,
+			ReplicaId:  a.ReplicaId,
 			InstanceId: i.id,
 		}
 	}
@@ -671,7 +674,8 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 	oldBallot := i.ballot.Clone()
 
 	// We optimize the case of committed instance in reply with ok=true message
-	// and do not update self ballot (useless for committed ones)
+	// and no need to update self ballot.
+	// So only non-committed instance needs to update self ballot.
 	if !i.isAtStatus(committed) {
 		if p.Ballot.Compare(i.ballot) <= 0 { // cannot be equal or smaller
 			panic(fmt.Sprintln("prepare ballot: ", p.Ballot, i.ballot))
@@ -686,9 +690,14 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		cmds = i.cmds.Clone()
 	}
 
+	isFromLeader := false
+	if i.replica.Id == p.ReplicaId {
+		isFromLeader = true
+	}
+
 	return replyAction, &data.PrepareReply{
 		Ok:             true,
-		ReplicaId:      i.replica.Id,
+		ReplicaId:      p.ReplicaId,
 		InstanceId:     i.id,
 		Status:         i.status,
 		Seq:            i.seq,
@@ -696,13 +705,15 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		Deps:           i.deps.Clone(),
 		Ballot:         p.Ballot.Clone(),
 		OriginalBallot: oldBallot,
+		IsFromLeader:   isFromLeader,
 	}
 }
 
+// Assumption:
+// 1. Receive first N/2 replies.
+//   Even if we broadcast prepare to all, we only handle the first N/2 (positive)
+//   replies. This assumption pertains to the identical non-leader preaccepted counts.
 func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg Message) {
-	// if the reply has larger ballot, then we can step down
-	//ri := i.recoveryInfo
-
 	if !i.isAtStatus(preparing) {
 		panic("")
 	}
@@ -710,14 +721,8 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 	if p.Ballot.Compare(i.ballot) < 0 {
 		panic("")
 	}
-
 	// negative reply
 	if p.Ballot.Compare(i.ballot) > 0 {
-
-		// [*] there may be stale but large ballots,
-		// if we receive such ballots, that means there may be another newer proposer,
-		// so we'd better step down by increasing our own ballot so we can ignore
-		// the following replies.
 		if p.Ok {
 			panic("")
 		}
@@ -725,190 +730,152 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 		return noAction, nil
 	}
 
-	// handle the message
-	switch p.Status {
-	case committed:
-		i.prepareReplyCommittedHelper(p)
-	case accepted:
-		i.prepareReplyAcceptedHelper(p)
-	case preAccepted:
-		i.prepareReplyPreAcceptedHelper(p)
-	case nilStatus:
-		i.prepareReplyNilStatusHelper(p)
-	default:
-		panic("")
+	i.updateRecoveryInstance(p)
+
+	i.recoveryInfo.replyCount++
+	if i.recoveryInfo.replyCount >= i.replica.quorum() {
+		return i.makeRecoveryDecision()
 	}
 
-	// if receiving commited reply, handle it now and exit
-	if i.recoveryInfo.status == committed {
-		return broadcastAction, i.makeCommit()
-	}
-
-	// jump to next status on receiving enough replies >= (N/2 + 1) including sender
-	if i.recoveryInfo.replyCount >= i.replica.quorum()+1 {
-		i.makeRecoveryDecision()
-
-		switch i.status {
-		case accepted:
-			return broadcastAction, i.makeAccept()
-		case preAccepted:
-			return broadcastAction, i.makePreAccept()
-		default:
-			panic("")
-		}
-	}
-
-	// not enough replies
+	// We will wait until N/2 replies to jump to next action.
 	return noAction, nil
 }
 
-func (i *Instance) makeRecoveryDecision() {
-	// [*] Here if i.recoveryInfo.cmds == nil, then it means
-	// 1, none of the replies has cmds.
-	// 2, i.cmds == nil, because in initRecovryInfo, i.recoveryInfo.cmds
-	//    is set to i.cmds.
-	// So, it's safe to set i.cmds to i.recoveryInfo.cmds here.
-	//
-	// Same for seq and deps
-	//
-	i.cmds = i.recoveryInfo.cmds
-	i.seq = i.recoveryInfo.seq
-	i.deps = i.recoveryInfo.deps
+// ***********************************
+// ***** PREPAREREPLY HELPER *********
+// ***********************************
 
+func (i *Instance) updateRecoveryInstance(p *data.PrepareReply) {
+	switch p.Status {
+	case committed:
+		i.handleCommittedPrepareReply(p)
+	case accepted:
+		i.handleAcceptedPrepareReply(p)
+	case preAccepted:
+		i.handlePreAcceptedPrepareReply(p)
+	case nilStatus:
+	default:
+		panic("")
+	}
+}
+
+func (i *Instance) updateRecoveryInfo(
+	cmds data.Commands, seq uint32, deps data.Dependencies,
+	ballot *data.Ballot, status uint8,
+) {
+	ir := i.recoveryInfo
+
+	ir.cmds, ir.seq, ir.deps = cmds, seq, deps
+	ir.ballot = ballot
+	ir.status = status
+}
+
+func (i *Instance) handleCommittedPrepareReply(p *data.PrepareReply) {
+	if i.recoveryInfo.statusIs(committed) {
+		return
+	}
+	i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, committed)
+}
+
+func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
+	ir := i.recoveryInfo
+	if ir.statusIsAfter(accepted) {
+		return
+	}
+
+	if ir.statusIsBefore(accepted) {
+		i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, accepted)
+		return
+	}
+
+	// for same status accepted reply, we will keep the one of largest ballot.
+	if ir.ballot.Compare(p.OriginalBallot) > 0 {
+		return
+	}
+	if ir.ballot.Compare(p.OriginalBallot) == 0 {
+		panic("")
+	}
+
+	i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, accepted)
+}
+
+func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
+	ir := i.recoveryInfo
+	if ir.statusIsAfter(preAccepted) {
+		return
+	}
+
+	if ir.statusIsBefore(preAccepted) {
+		i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, preAccepted)
+		if p.Ballot.IsInitialBallot() && !p.IsFromLeader{
+			ir.identicalCount = 1
+		}
+		return
+	}
+
+	if ir.ballot.Compare(p.Ballot) > 0 {
+		return
+	}
+	if ir.ballot.Compare(p.Ballot) < 0 {
+		i.updateRecoveryInfo(p.Cmds, p.Seq, p.Deps, p.Ballot, preAccepted)
+		ir.identicalCount = 1
+		return
+	}
+
+	if p.Ballot.IsInitialBallot() && !p.IsFromLeader &&
+		ir.deps.Same(p.Deps) {
+		ir.identicalCount++
+	}
+}
+
+func (i *Instance) moveRecoveryToSelf() {
+	ir := i.recoveryInfo
+	i.cmds, i.seq, i.deps, i.ballot = ir.cmds, ir.seq, ir.deps, ir.ballot
+	i.status = ir.status
+}
+
+// TODO: Make up the message of returned!
+func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
+	i.moveRecoveryToSelf()
+
+	ir := i.recoveryInfo
 	// determine status
-	switch i.recoveryInfo.status {
+	switch ir.status {
+	case committed:
+		i.enterCommitted()
+
 	case accepted:
 		i.enterAcceptedAsSender()
-	case preAccepted:
-		// test if we have received enough preAccept replies
-		if i.recoveryInfo.preAcceptedCount < i.replica.quorum() {
-			i.recoveryInfo.formerLeaderWasOnFastPath = false
-		}
 
+	case preAccepted:
 		// if former leader committed on fast-path,
 		// then we must send accept instead of pre-accept
-		if i.recoveryInfo.formerLeaderWasOnFastPath {
+		if ir.identicalCount == i.replica.quorum() {
 			i.enterAcceptedAsSender()
+
 		} else {
 			i.enterPreAcceptedAsSender()
+
 		}
 	case nilStatus:
 		// get ready to send Accept for No-op
 		i.enterAcceptedAsSender()
+
 	default:
 		panic("")
 	}
-}
-
-// helpers for handling prepareReply
-func (i *Instance) prepareReplyCommittedHelper(p *data.PrepareReply) {
-	i.seq, i.deps = p.Seq, p.Deps
-	if p.Cmds != nil {
-		i.cmds = p.Cmds
-	}
-
-	i.enterCommitted()
-}
-
-// Assumptions:
-// p.Deps must be non-zeros
-func (i *Instance) prepareReplyAcceptedHelper(p *data.PrepareReply) {
-	if p.Deps.IsInitialDependencies() {
-		panic("")
-	}
-
-	i.recoveryInfo.replyCount++
-
-	// record the info of the newest accepted reply
-	if updated := i.updateRcoveryStatusAndBallot(p); updated {
-		i.recoveryInfo.seq, i.recoveryInfo.deps = p.Seq, p.Deps
-		if p.Cmds != nil {
-			i.recoveryInfo.cmds = p.Cmds
-		}
-	}
-}
-
-// Assumptions:
-// 1, recoveryinfo.ballot = all zeros if and only if
-// the instance's former status = nilStatus.
-// 2, the deps in reply must be non-zeros.
-//
-// So there is at most one time that i.recoveryInfo.deps be all zeros when
-// calling IsConflictWith.
-func (i *Instance) prepareReplyPreAcceptedHelper(p *data.PrepareReply) {
-	if p.Deps.IsInitialDependencies() {
-		panic("")
-	}
-
-	i.recoveryInfo.replyCount++
-	i.recoveryInfo.preAcceptedCount++
-
-	var same bool
-	if i.recoveryInfo.deps.IsInitialDependencies() {
-		if i.recoveryInfo.preAcceptedCount > 1 {
-			panic("")
-		}
-		same = true
-	} else {
-		same = i.recoveryInfo.deps.Same(p.Deps)
-	}
-
-	if !p.Ballot.IsInitialBallot() || p.IsFromLeader || !same {
-		i.recoveryInfo.formerLeaderWasOnFastPath = false
-	}
-
-	// record the info of the newest pre-accepted reply
-	if updated := i.updateRcoveryStatusAndBallot(p); updated {
-		i.recoveryInfo.seq, i.recoveryInfo.deps = p.Seq, p.Deps
-		if p.Cmds != nil {
-			i.recoveryInfo.cmds = p.Cmds
-		}
-	}
-}
-
-func (i *Instance) prepareReplyNilStatusHelper(p *data.PrepareReply) {
-	i.recoveryInfo.replyCount++
-}
-
-func (i *Instance) updateRcoveryStatusAndBallot(p *data.PrepareReply) bool {
-	// refresh the ballot if we enter a higher status
-	if i.recoveryInfo.isBeforeStatus(p.Status) {
-		i.recoveryInfo.status = p.Status
-		i.recoveryInfo.ballot = p.Ballot
-		return true
-	}
-
-	// update the ballot
-	if i.recoveryInfo.isAtStatus(p.Status) && p.OriginalBallot.Compare(i.recoveryInfo.ballot) > 0 {
-		i.recoveryInfo.ballot = p.Ballot
-		return true
-	}
-	return false
-}
-
-// checkStatus checks the status of the instance
-// it panics if the instance's status is not as expected
-func (i *Instance) checkStatus(statusList ...uint8) {
-	ok := false
-	for _, status := range statusList {
-		if i.isAtStatus(status) {
-			ok = true
-			break
-		}
-	}
-	if !ok {
-		panic("")
-	}
+	action = broadcastAction
+	return
 }
 
 // ****************************
 // ******* Make Message *******
 // ****************************
 
-func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencies) *data.PreAcceptReply {
+func (i *Instance) makePreAcceptReply(replicaId uint8, ok bool, seq uint32, deps data.Dependencies) *data.PreAcceptReply {
 	return &data.PreAcceptReply{
 		Ok:         ok,
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  replicaId,
 		InstanceId: i.id,
 		Seq:        seq,
 		Deps:       deps,
@@ -916,35 +883,35 @@ func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencie
 	}
 }
 
-func (i *Instance) makePreAccept() *data.PreAccept {
+func (i *Instance) makePreAccept(replicaId uint8) *data.PreAccept {
 	return &data.PreAccept{
+		ReplicaId:  replicaId,
+		InstanceId: i.id,
 		Cmds:       i.cmds.Clone(),
 		Seq:        i.seq,
 		Deps:       i.deps.Clone(),
-		ReplicaId:  i.replica.Id,
-		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
 	}
 }
 
-func (i *Instance) makeAccept() *data.Accept {
+func (i *Instance) makeAccept(replicaId uint8) *data.Accept {
 	return &data.Accept{
+		ReplicaId:  replicaId,
+		InstanceId: i.id,
 		Cmds:       i.cmds.Clone(),
 		Seq:        i.seq,
 		Deps:       i.deps.Clone(),
-		ReplicaId:  i.replica.Id,
-		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
 	}
 }
 
-func (i *Instance) makeCommit() *data.Commit {
+func (i *Instance) makeCommit(replicaId uint8) *data.Commit {
 	return &data.Commit{
+		ReplicaId:  replicaId,
+		InstanceId: i.id,
 		Cmds:       i.cmds, // [*] no need to clone
 		Seq:        i.seq,
 		Deps:       i.deps, // [*] no need to clone either
-		ReplicaId:  i.replica.Id,
-		InstanceId: i.id,
 	}
 }
 
@@ -980,6 +947,8 @@ func (i *Instance) enterCommitted() {
 func (i *Instance) enterPreparing() {
 	i.checkStatus(nilStatus, preAccepted, preparing, accepted)
 
+	i.initRecoveryInfo()
+
 	// differentiates two cases on entering preparing:
 	// - seen any message about this instance before (with ballot).
 	// - never seen anything concerning this instance before.
@@ -992,6 +961,21 @@ func (i *Instance) enterPreparing() {
 		i.ballot.IncNumber()
 		i.ballot.SetReplicaId(i.replica.Id)
 	}
-	i.initRecoveryInfo()
+
 	i.status = preparing
+}
+
+// checkStatus checks the status of the instance
+// it panics if the instance's status is not as expected
+func (i *Instance) checkStatus(statusList ...uint8) {
+	ok := false
+	for _, status := range statusList {
+		if i.isAtStatus(status) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		panic("")
+	}
 }
