@@ -32,3 +32,16 @@ func (d Dependencies) Clone() Dependencies {
 	copy(deps, d)
 	return deps
 }
+
+func (d Dependencies) Same(other Dependencies) bool {
+	if len(d) != len(other) {
+		panic("Same: different size!")
+	}
+
+	for i := range d {
+		if d[i] != other[i] {
+			return false
+		}
+	}
+	return true
+}

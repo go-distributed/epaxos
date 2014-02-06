@@ -8,15 +8,17 @@ type Prepare struct {
 }
 
 type PrepareReply struct {
-	Ok             bool
-	ReplicaId      uint8
-	InstanceId     uint64
-	Status         uint8
-	Seq            uint32
-	Cmds           Commands
-	Deps           Dependencies
-	Ballot         *Ballot
+	Ok         bool
+	ReplicaId  uint8
+	InstanceId uint64
+	Status     uint8
+	Seq        uint32
+	Cmds       Commands
+	Deps       Dependencies
+	Ballot     *Ballot
+	// These two are used for identical non orignal leader pre-accept reply
 	OriginalBallot *Ballot
+	IsFromLeader   bool
 }
 
 func (p *Prepare) Type() uint8 {
