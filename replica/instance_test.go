@@ -159,14 +159,14 @@ func TestNilStatusProcessPropose(t *testing.T) {
 	assert.Equal(t, i.status, preAccepted)
 	assert.Equal(t, action, fastQuorumAction)
 
-	assert.True(t, assert.ObjectsAreEqual(pa, &data.PreAccept{
+	assert.Equal(t, pa, &data.PreAccept{
 		ReplicaId:  i.replica.Id,
 		InstanceId: i.id,
 		Cmds:       commonTestlibExampleCommands(),
 		Seq:        0,
 		Deps:       i.deps,
 		Ballot:     i.replica.makeInitialBallot(),
-	}))
+	})
 
 	assert.Equal(t, i.info.preAcceptCount, 0)
 	assert.True(t, i.info.isFastPath)
@@ -415,10 +415,11 @@ func TestPreAcceptedProcessWithRejectPrepare(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.PrepareReply{
-		Ok:         false,
-		ReplicaId:  inst.replica.Id,
-		InstanceId: inst.id,
-		Ballot:     largerBallot,
+		Ok:             false,
+		ReplicaId:      inst.replica.Id,
+		InstanceId:     inst.id,
+		Ballot:         smallerBallot,
+		OriginalBallot: largerBallot,
 	})
 	assert.Equal(t, inst, originalInst)
 }
@@ -829,10 +830,11 @@ func TestAcceptedProcessWithRejectPrepare(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, msg, &data.PrepareReply{
-		Ok:         false,
-		ReplicaId:  inst.replica.Id,
-		InstanceId: inst.id,
-		Ballot:     largeBallot,
+		Ok:             false,
+		ReplicaId:      inst.replica.Id,
+		InstanceId:     inst.id,
+		Ballot:         smallBallot,
+		OriginalBallot: largeBallot,
 	})
 	assert.Equal(t, inst, originalInst)
 }
@@ -1199,33 +1201,34 @@ func TestRejections(t *testing.T) {
 	action, par := inst.rejectPreAccept()
 	assert.Equal(t, action, replyAction)
 
-	assert.True(t, assert.ObjectsAreEqual(par, &data.PreAcceptReply{
+	assert.Equal(t, par, &data.PreAcceptReply{
 		Ok:         false,
 		ReplicaId:  inst.replica.Id,
 		InstanceId: inst.id,
 		Ballot:     expectedBallot,
-	}))
+	})
 
 	// reject with AcceptReply
 	action, ar := inst.rejectAccept()
 	assert.Equal(t, action, replyAction)
 
-	assert.True(t, assert.ObjectsAreEqual(ar, &data.AcceptReply{
+	assert.Equal(t, ar, &data.AcceptReply{
 		Ok:         false,
 		ReplicaId:  inst.replica.Id,
 		InstanceId: inst.id,
 		Ballot:     expectedBallot,
-	}))
+	})
 
 	// reject with PrepareReply
-	action, ppr := inst.rejectPrepare()
+	action, ppr := inst.rejectPrepare(expectedBallot)
 	assert.Equal(t, action, replyAction)
-	assert.True(t, assert.ObjectsAreEqual(ppr, &data.PrepareReply{
-		Ok:         false,
-		ReplicaId:  inst.replica.Id,
-		InstanceId: inst.id,
-		Ballot:     expectedBallot,
-	}))
+	assert.Equal(t, ppr, &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      inst.replica.Id,
+		InstanceId:     inst.id,
+		Ballot:         expectedBallot,
+		OriginalBallot: expectedBallot,
+	})
 }
 
 // ******************************
