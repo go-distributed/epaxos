@@ -110,6 +110,9 @@ func TestBallotClone(t *testing.T) {
 
 	assert.True(t, &b != &c)
 	assert.Equal(t, b, c)
+
+	var d *Ballot
+	assert.Panics(t, func() { d.Clone() })
 }
 
 func TestBallotEpoch(t *testing.T) {
@@ -120,4 +123,10 @@ func TestBallotEpoch(t *testing.T) {
 func TestBallotIsInitialBallot(t *testing.T) {
 	b := NewBallot(2, 0, 3)
 	assert.True(t, b.IsInitialBallot())
+}
+
+func TestBallotSetNumber(t *testing.T) {
+	b := NewBallot(1, 2, 3)
+	b.SetNumber(4)
+	assert.Equal(t, b.number, uint64(4))
 }
