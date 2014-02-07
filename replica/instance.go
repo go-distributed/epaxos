@@ -14,6 +14,9 @@ package replica
 // - Executed will be recorded in a flag. This will simplify the state machine.
 // @decision (02/05/14):
 // - No-op == Commands(nil)
+// @decision (02/07/14):
+// - if prepare's ballot is smaller than the instance, than return the instance's ballot
+//   in prepareReply's ballot, not in original ballot.
 
 import (
 	"fmt"
@@ -215,7 +218,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare(content.Ballot)
+			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
 	case *data.PrepareReply:
@@ -255,7 +258,7 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare(content.Ballot)
+			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply:
@@ -306,7 +309,7 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleCommit(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare(content.Ballot)
+			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
 	case *data.AcceptReply:
@@ -381,7 +384,7 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 			panic("")
 		}
 		if content.Ballot.Compare(i.ballot) < 0 {
-			return i.rejectPrepare(content.Ballot)
+			return i.rejectPrepare()
 		}
 		return i.revertAndHandlePrepare(content)
 	case *data.PrepareReply:
@@ -442,13 +445,12 @@ func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
 // - ok : false
 // - Ballot: self (ballot)
 // - relevant Ids
-func (i *Instance) rejectPrepare(origBallot *data.Ballot) (action uint8, reply *data.PrepareReply) {
+func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 	return replyAction, &data.PrepareReply{
-		Ok:             false,
-		ReplicaId:      i.rowId,
-		InstanceId:     i.id,
-		Ballot:         origBallot,
-		OriginalBallot: i.ballot.Clone(),
+		Ok:         false,
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     i.ballot.Clone(),
 	}
 }
 

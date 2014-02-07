@@ -415,11 +415,10 @@ func TestPreAcceptedProcessWithRejectPrepare(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.PrepareReply{
-		Ok:             false,
-		ReplicaId:      inst.replica.Id,
-		InstanceId:     inst.id,
-		Ballot:         smallerBallot,
-		OriginalBallot: largerBallot,
+		Ok:         false,
+		ReplicaId:  inst.replica.Id,
+		InstanceId: inst.id,
+		Ballot:     largerBallot,
 	})
 	assert.Equal(t, inst, originalInst)
 }
@@ -830,11 +829,10 @@ func TestAcceptedProcessWithRejectPrepare(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, msg, &data.PrepareReply{
-		Ok:             false,
-		ReplicaId:      inst.replica.Id,
-		InstanceId:     inst.id,
-		Ballot:         smallBallot,
-		OriginalBallot: largeBallot,
+		Ok:         false,
+		ReplicaId:  inst.replica.Id,
+		InstanceId: inst.id,
+		Ballot:     largeBallot,
 	})
 	assert.Equal(t, inst, originalInst)
 }
@@ -1220,14 +1218,13 @@ func TestRejections(t *testing.T) {
 	})
 
 	// reject with PrepareReply
-	action, ppr := inst.rejectPrepare(expectedBallot)
+	action, ppr := inst.rejectPrepare()
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, ppr, &data.PrepareReply{
-		Ok:             false,
-		ReplicaId:      inst.replica.Id,
-		InstanceId:     inst.id,
-		Ballot:         expectedBallot,
-		OriginalBallot: expectedBallot,
+		Ok:         false,
+		ReplicaId:  inst.replica.Id,
+		InstanceId: inst.id,
+		Ballot:     expectedBallot,
 	})
 }
 
