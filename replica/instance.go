@@ -14,6 +14,9 @@ package replica
 // - Executed will be recorded in a flag. This will simplify the state machine.
 // @decision (02/05/14):
 // - No-op == Commands(nil)
+// @decision (02/07/14):
+// - if prepare's ballot is smaller than the instance, than return the instance's ballot
+//   in prepareReply's ballot, not in original ballot.
 
 import (
 	"fmt"
@@ -435,12 +438,7 @@ func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) 
 // - InstanceId: self.id
 // - other fields: undefined
 func (i *Instance) rejectAccept() (action uint8, reply *data.AcceptReply) {
-	return replyAction, &data.AcceptReply{
-		Ok:         false,
-		ReplicaId:  i.rowId,
-		InstanceId: i.id,
-		Ballot:     i.ballot.Clone(),
-	}
+	return replyAction, i.makeAcceptReply(false)
 }
 
 // Prepare reply:
@@ -561,26 +559,15 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		// TODO: persistent
 		i.enterCommitted()
 
-		return broadcastAction, &data.Commit{
-			Cmds:       i.cmds.Clone(),
-			Seq:        i.seq,
-			Deps:       i.deps.Clone(),
-			ReplicaId:  i.rowId,
-			InstanceId: i.id,
-		}
-	} else if i.info.preAcceptCount >= i.replica.quorum() && !i.ableToFastPath() {
+		return broadcastAction, i.makeCommit()
+	}
+
+	if i.info.preAcceptCount >= i.replica.quorum() && !i.ableToFastPath() {
 		// TODO: persistent
 		i.enterAcceptedAsSender()
-
-		return broadcastAction, &data.Accept{
-			Cmds:       i.cmds.Clone(),
-			Seq:        i.seq,
-			Deps:       i.deps.Clone(),
-			ReplicaId:  i.rowId,
-			InstanceId: i.id,
-			Ballot:     i.ballot.Clone(),
-		}
+		return broadcastAction, i.makeAccept()
 	}
+
 	return noAction, nil
 }
 
@@ -602,12 +589,7 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 	i.cmds, i.seq, i.deps, i.ballot = a.Cmds, a.Seq, a.Deps, a.Ballot
 	i.enterAcceptedAsReceiver()
 
-	return replyAction, &data.AcceptReply{
-		Ok:         true,
-		ReplicaId:  i.rowId,
-		InstanceId: i.id,
-		Ballot:     i.ballot.Clone(),
-	}
+	return replyAction, i.makeAcceptReply(true)
 }
 
 // handleAcceptReply handles AcceptReplies as sender,
@@ -643,14 +625,9 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 	i.info.acceptCount++
 	if i.info.acceptCount >= i.replica.quorum() {
 		i.enterCommitted()
-		return broadcastAction, &data.Commit{
-			Cmds:       i.cmds.Clone(),
-			Seq:        i.seq,
-			Deps:       i.deps.Clone(),
-			ReplicaId:  i.rowId,
-			InstanceId: i.id,
-		}
+		return broadcastAction, i.makeCommit()
 	}
+
 	return noAction, nil
 }
 
@@ -903,6 +880,15 @@ func (i *Instance) makeAccept() *data.Accept {
 	}
 }
 
+func (i *Instance) makeAcceptReply(ok bool) *data.AcceptReply {
+	return &data.AcceptReply{
+		Ok:         ok,
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     i.ballot.Clone(),
+	}
+}
+
 func (i *Instance) makeCommit() *data.Commit {
 	return &data.Commit{
 		ReplicaId:  i.rowId,
@@ -938,10 +924,12 @@ func (i *Instance) enterAcceptedAsReceiver() {
 	i.checkStatus(nilStatus, preAccepted, preparing, accepted)
 	i.status = accepted
 }
+
 func (i *Instance) enterCommitted() {
 	i.checkStatus(nilStatus, preAccepted, preparing, accepted)
 	i.status = committed
 }
+
 func (i *Instance) enterPreparing() {
 	i.checkStatus(nilStatus, preAccepted, preparing, accepted)
 
