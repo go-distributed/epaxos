@@ -54,4 +54,4 @@ We are documenting directories description here.
 
 Contact
 ------
-Send your questions and advices to *epaxos-dev@googlegroups.com*
+Send your questions or advices to *epaxos-dev@googlegroups.com*

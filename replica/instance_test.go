@@ -34,38 +34,49 @@ func commonTestlibUnionedDeps() data.Dependencies {
 func commonTestlibExampleInstance() *Instance {
 	r := New(0, 5, new(test.DummySM))
 	i := NewInstance(r, 0, conflictNotFound+1)
-	i.cmds = data.Commands{
-		data.Command("world"),
-	}
-
-	i.deps = data.Dependencies{
-		0, 1, 2, 3, 4,
-	}
-
-	i.seq = 42
 	return i
 }
 
 func commonTestlibExampleNilStatusInstance() *Instance {
-	r := New(0, 5, new(test.DummySM))
-	return NewInstance(r, 0, conflictNotFound+1)
+	return commonTestlibExampleInstance()
 }
 func commonTestlibExamplePreAcceptedInstance() *Instance {
 	i := commonTestlibExampleInstance()
 	i.status = preAccepted
 	i.ballot = i.replica.makeInitialBallot()
+	i.cmds = data.Commands{
+		data.Command("world"),
+	}
+	i.deps = data.Dependencies{
+		0, 1, 2, 3, 4,
+	}
+	i.seq = 42
 	return i
 }
 func commonTestlibExampleAcceptedInstance() *Instance {
 	i := commonTestlibExampleInstance()
 	i.status = accepted
 	i.ballot = i.replica.makeInitialBallot()
+	i.cmds = data.Commands{
+		data.Command("world"),
+	}
+	i.deps = data.Dependencies{
+		0, 1, 2, 3, 4,
+	}
+	i.seq = 42
 	return i
 }
 func commonTestlibExampleCommittedInstance() *Instance {
 	i := commonTestlibExampleInstance()
 	i.status = committed
 	i.ballot = i.replica.makeInitialBallot()
+	i.cmds = data.Commands{
+		data.Command("world"),
+	}
+	i.deps = data.Dependencies{
+		0, 1, 2, 3, 4,
+	}
+	i.seq = 42
 	return i
 }
 func commonTestlibExamplePreParingInstance() *Instance {
@@ -440,8 +451,7 @@ func TestPreAcceptedProcessWithHandlePrepare(t *testing.T) {
 
 	// create and send a prepare message to the instance
 	pr := &data.Prepare{
-		Ballot:          largerBallot,
-		NeedCmdsInReply: true,
+		Ballot: largerBallot,
 	}
 	action, m := inst.preAcceptedProcess(pr)
 
@@ -818,8 +828,7 @@ func TestAcceptedProcessWithRejectPrepare(t *testing.T) {
 
 	// create a commit message and send it to the instance
 	p := &data.Prepare{
-		NeedCmdsInReply: true,
-		Ballot:          smallBallot,
+		Ballot: smallBallot,
 	}
 	action, msg := inst.acceptedProcess(p)
 
@@ -853,8 +862,7 @@ func TestAcceptedProcessWithHandlePrepare(t *testing.T) {
 
 	// create a commit message and send it to the instance
 	p := &data.Prepare{
-		NeedCmdsInReply: true,
-		Ballot:          largeBallot,
+		Ballot: largeBallot,
 	}
 	action, msg := inst.acceptedProcess(p)
 
@@ -1096,9 +1104,7 @@ func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 		Seq:          inst.seq,
 		Deps:         inst.deps,
 	}
-	p := &data.Prepare{
-		NeedCmdsInReply: true,
-	}
+	p := &data.Prepare{}
 
 	// expect:
 	// - action: replyAction
@@ -1179,6 +1185,56 @@ func TestCommittedProccessWithPanic(t *testing.T) {
 // ***** PREPARING ******
 // **********************
 
+// If a preparing instance as nilstatus handles
+// - committed reply, it should set its recovery info according to the reply
+// - accepted reply, it should set its recovery info according to the reply
+// - pre-accepted reply, it should set its recovery info according to the reply
+func TestNilStatusPreparingHandlePrepareReply(t *testing.T) {
+	// committed reply
+	i := commonTestlibExamplePreParingInstance()
+	ir := i.recoveryInfo
+
+	originalBallot := i.replica.makeInitialBallot()
+	messageBallot := i.ballot.Clone()
+
+	p := &data.PrepareReply{
+		Ok:             true,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Cmds:           commonTestlibExampleCommands(),
+		Seq:            i.seq + 1,
+		Deps:           commonTestlibExampleDeps(),
+		Ballot:         messageBallot,
+		OriginalBallot: originalBallot,
+		IsFromLeader:   false,
+	}
+	p.Status = committed
+
+	assert.Equal(t, ir.status, nilStatus)
+	assert.NotEqual(t, ir.cmds, p.Cmds)
+
+	i.handlePrepareReply(p)
+
+	assert.Equal(t, ir.status, committed)
+	assert.Equal(t, ir.cmds, p.Cmds)
+
+	// accepted reply
+	i = commonTestlibExamplePreParingInstance()
+	ir = i.recoveryInfo
+	p.Status = accepted
+
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.status, accepted)
+
+	// pre-accepted reply
+	i = commonTestlibExamplePreParingInstance()
+	ir = i.recoveryInfo
+	p.Status = preAccepted
+
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.status, preAccepted)
+}
+
 // **********************
 // ***** REJECTIONS *****
 // **********************
@@ -1233,7 +1289,6 @@ func TestRejections(t *testing.T) {
 // ******************************
 
 // It's testing `handleprepare` will return (replyaction, correct prepare-reply)
-// If we send prepare which sets `needcmdsinreply` true, it should return cmds in reply.
 func TestHandlePrepare(t *testing.T) {
 	i := commonTestlibExamplePreAcceptedInstance()
 	smallerBallot := i.replica.makeInitialBallot()
@@ -1242,12 +1297,10 @@ func TestHandlePrepare(t *testing.T) {
 	i.ballot = smallerBallot
 	i.deps = data.Dependencies{3, 4, 5, 6, 7}
 
-	// NeedCmdsInReply == false
 	prepare := &data.Prepare{
-		ReplicaId:       i.replica.Id,
-		InstanceId:      i.id,
-		Ballot:          largerBallot,
-		NeedCmdsInReply: false,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Ballot:     largerBallot,
 	}
 
 	action, reply := i.handlePrepare(prepare)
@@ -1259,9 +1312,9 @@ func TestHandlePrepare(t *testing.T) {
 	assert.Equal(t, reply, &data.PrepareReply{
 		Ok:             true,
 		Seq:            42,
-		Cmds:           nil,
+		Cmds:           i.cmds,
 		Status:         preAccepted,
-		Deps:           i.deps.Clone(),
+		Deps:           i.deps,
 		Ballot:         largerBallot,
 		OriginalBallot: smallerBallot,
 		ReplicaId:      i.rowId,
@@ -1269,8 +1322,6 @@ func TestHandlePrepare(t *testing.T) {
 		InstanceId:     i.id,
 	})
 
-	// NeedCmdsInReply == true
-	prepare.NeedCmdsInReply = true
 	i.cmds = commonTestlibExampleCommands()
 	i.ballot = i.replica.makeInitialBallot()
 
@@ -1280,14 +1331,38 @@ func TestHandlePrepare(t *testing.T) {
 	assert.Equal(t, reply.Cmds, i.cmds)
 }
 
-// TestHandleCommit tests the functionality of handleCommit
-// on success: handleCommit returns a no act and nil message,
-// besides, the instances' status is set to commited.
-// on failure: otherwise
+// If nilstatus, preacepted, accepted, preparing instances handles commit,
+// they should be changed to committed and accept things from commit message.
 func TestHandleCommit(t *testing.T) {
-}
+	i := commonTestlibExampleAcceptedInstance()
 
-func TestHandlePrepareReply(t *testing.T) {
+	cm := &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       commonTestlibExampleCommands(),
+		Seq:        i.seq + 1,
+		Deps:       commonTestlibExampleDeps(),
+	}
+	action, msg := i.handleCommit(cm)
+
+	assert.Equal(t, i.status, committed)
+	assert.Equal(t, i.cmds, cm.Cmds)
+	assert.Equal(t, i.seq, cm.Seq)
+	assert.Equal(t, i.deps, cm.Deps)
+	assert.Equal(t, action, noAction)
+	assert.Equal(t, msg, nil)
+
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.handleCommit(cm)
+	assert.Equal(t, i.status, committed)
+
+	i = commonTestlibExamplePreParingInstance()
+	i.handleCommit(cm)
+	assert.Equal(t, i.status, committed)
+
+	i = commonTestlibExampleNilStatusInstance()
+	i.handleCommit(cm)
+	assert.Equal(t, i.status, committed)
 }
 
 // TestCheckStatus tests the behaviour of checkStatus,

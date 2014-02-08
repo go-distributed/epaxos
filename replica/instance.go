@@ -173,10 +173,8 @@ func (r *RecoveryInfo) statusIsAfter(status uint8) bool {
 }
 
 func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
-	if r.cmds == nil && p.Cmds != nil {
-		r.cmds = p.Cmds
-	}
-	r.seq, r.deps, r.ballot, r.status = p.Seq, p.Deps, p.Ballot, p.Status
+	r.cmds, r.seq, r.deps = p.Cmds, p.Seq, p.Deps
+	r.ballot, r.status = p.Ballot, p.Status
 }
 
 // ******************************
@@ -662,13 +660,6 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		i.ballot = p.Ballot
 	}
 
-	cmds := data.Commands(nil)
-	// if the preparing instance know the commands (i.e. it has been told
-	// beforehand), we won't bother to serialize it over the network.
-	if p.NeedCmdsInReply {
-		cmds = i.cmds.Clone()
-	}
-
 	isFromLeader := false
 	if i.replica.Id == i.rowId {
 		isFromLeader = true
@@ -679,7 +670,7 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		ReplicaId:      i.rowId,
 		InstanceId:     i.id,
 		Status:         i.status,
-		Cmds:           cmds,
+		Cmds:           i.cmds.Clone(),
 		Seq:            i.seq,
 		Deps:           i.deps.Clone(),
 		Ballot:         p.Ballot.Clone(),
@@ -688,10 +679,17 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 	}
 }
 
+// This function handles the prepare reply and update recover info:
+// - committed reply
+// - accepted reply
+// - pre-accepted reply
+// - nilstatus (noop) reply
+// Broadcast action happesn when quorum replies are received, and
+// -
 // Assumption:
 // 1. Receive first N/2 replies.
 //   Even if we broadcast prepare to all, we only handle the first N/2 (positive)
-//   replies. This assumption pertains to the identical non-leader preaccepted counts.
+//   replies.
 func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg Message) {
 	if !i.isAtStatus(preparing) {
 		panic("")
@@ -799,13 +797,14 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 }
 
+// This will load the cmds, seq, deps, ballot, status
+// from recovery info to the instance fields.
 func (i *Instance) loadRecoveryInfo() {
 	ir := i.recoveryInfo
 	i.cmds, i.seq, i.deps = ir.cmds, ir.seq, ir.deps
 	i.ballot, i.status = ir.ballot, ir.status
 }
 
-// TODO: Make up the message of returned!
 func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
 	i.loadRecoveryInfo()
 
