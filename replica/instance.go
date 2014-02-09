@@ -145,12 +145,12 @@ func (i *Instance) initRecoveryInfo() {
 	ir := i.recoveryInfo
 
 	ir.replyCount = 0
-	ir.cmds = i.cmds
-	ir.deps = i.deps
+	ir.cmds = i.cmds.Clone()
+	ir.deps = i.deps.Clone()
 	ir.status = i.status
 	ir.formerStatus = i.status
-	ir.formerBallot = i.ballot
-	ir.ballot = i.ballot
+	ir.formerBallot = i.ballot.Clone()
+	ir.ballot = i.ballot.Clone()
 
 	// preacceptcount is used to count N/2 identical initial preaccepts.
 	if i.isAtStatus(preAccepted) && i.ballot.IsInitialBallot() && i.rowId != i.replica.Id {
@@ -174,7 +174,7 @@ func (r *RecoveryInfo) statusIsAfter(status uint8) bool {
 
 func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
 	r.cmds, r.seq, r.deps = p.Cmds, p.Seq, p.Deps
-	r.ballot, r.status = p.Ballot, p.Status
+	r.ballot, r.status = p.OriginalBallot, p.Status
 }
 
 // ******************************
@@ -189,12 +189,6 @@ func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
 // - the instance is not newly created when
 // - - after reverted back from `preparing`(sender -> receiver)
 // - - received prepare and waiting for further message. (receiver)
-//
-// If a preparing instance as nilstatus handles prepare reply of
-// - committed reply, it should set its recovery info according to the reply
-// - accepted reply, it should set its recovery info according to the reply
-// - pre-accepted reply, it should set its recovery info according to the reply
-// - nilstatus reply, ignore
 func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preAccepted, accepted, committed, preparing)
 
@@ -696,6 +690,24 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 // 1. Receive first N/2 replies.
 //   Even if we broadcast prepare to all, we only handle the first N/2 (positive)
 //   replies.
+//
+// If a preparing instance as nilstatus handles prepare reply of
+// - committed, it should set its recovery info according to the reply
+// - accepted, it should set its recovery info according to the reply
+// - pre-accepted, it should set its recovery info according to the reply
+// - nilstatus, ignore
+//
+// If a preparing instance as preaccepted handles prepare reply of
+// - committed, it should set its recovery info according to the reply
+// - accepted, it should set its recovery info according to the reply
+// - nilstatus, ignore
+// - pre-accepted, where original ballot compared to recovery ballot is
+// - - larger, set accordingly
+// - - smaller, ignore
+// - - same, but
+// - - - not initial or initial but from leader, ignore
+// Finally, send N/2 identical initial pre-accepted back, it should
+// broadcast accepts.
 func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg Message) {
 	if !i.isAtStatus(preparing) {
 		panic("")
@@ -720,7 +732,7 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 		return i.makeRecoveryDecision()
 	}
 
-	// We will wait until N/2 replies to jump to next action.
+	// We will wait until having received N/2 replies for next transition.
 	return noAction, nil
 }
 
@@ -779,17 +791,17 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 
 	if ir.statusIsBefore(preAccepted) {
 		ir.updateByPrepareReply(p)
-		if p.Ballot.IsInitialBallot() && !p.IsFromLeader {
+		if p.OriginalBallot.IsInitialBallot() && !p.IsFromLeader {
 			ir.identicalCount = 1
 		}
 		return
 	}
 
-	if ir.ballot.Compare(p.Ballot) > 0 {
+	if ir.ballot.Compare(p.OriginalBallot) > 0 {
 		return
 	}
 
-	if ir.ballot.Compare(p.Ballot) < 0 {
+	if ir.ballot.Compare(p.OriginalBallot) < 0 {
 		// Obviously, p.Ballot is not initial ballot,
 		// in this case, we won't send accept next.
 		ir.updateByPrepareReply(p)
@@ -797,8 +809,8 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 		return
 	}
 
-	if p.Ballot.IsInitialBallot() && !p.IsFromLeader &&
-		ir.deps.Same(p.Deps) {
+	if p.OriginalBallot.IsInitialBallot() && !p.IsFromLeader &&
+		ir.deps.SameAs(p.Deps) {
 		ir.identicalCount++
 	}
 }
@@ -945,8 +957,8 @@ func (i *Instance) enterPreparing() {
 		i.ballot = i.replica.makeInitialBallot()
 		i.ballot.IncNumber()
 	} else {
-		i.ballot.IncNumber()
 		i.ballot.SetReplicaId(i.replica.Id)
+		i.ballot.IncNumber()
 	}
 
 	i.status = preparing

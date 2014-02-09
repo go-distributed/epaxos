@@ -1244,6 +1244,132 @@ func TestNilStatusPreparingHandlePrepareReply(t *testing.T) {
 	assert.NotEqual(t, ir.cmds, p.Cmds)
 }
 
+// If a preparing instance as preaccepted handles prepare reply of
+// - committed, it should set its recovery info according to the reply
+// - accepted, it should set its recovery info according to the reply
+// - nilstatus, ignore
+// - pre-accepted, where original ballot compared to recovery ballot is
+// - - larger, set accordingly
+// - - smaller, ignore
+// - - same, but
+// - - - not initial or initial but from leader, ignore
+// Finally, send N/2 identical initial pre-accepted back, it should
+// broadcast accepts.
+func TestPreAcceptedPreparingHandlePrepareReply(t *testing.T) {
+	// committed
+	i := commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir := i.recoveryInfo
+
+	assert.Equal(t, ir.ballot.Number(), uint64(0))
+
+	originalBallot := ir.ballot
+	messageBallot := i.ballot.Clone()
+
+	p := &data.PrepareReply{
+		Ok:             true,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Cmds:           commonTestlibExampleCommands(),
+		Seq:            i.seq + 1,
+		Deps:           commonTestlibExampleDeps(),
+		Ballot:         messageBallot,
+		OriginalBallot: originalBallot,
+		IsFromLeader:   false,
+	}
+	p.Status = committed
+
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.status, committed)
+	assert.Equal(t, ir.cmds, p.Cmds)
+
+	// accepted
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir = i.recoveryInfo
+	p.Status = accepted
+
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.status, accepted)
+
+	// nilstatus
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir = i.recoveryInfo
+	p.Status = nilStatus
+
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.status, preAccepted)
+	assert.NotEqual(t, ir.cmds, p.Cmds)
+
+	// preaccepted
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir = i.recoveryInfo
+	p.Status = preAccepted
+
+	// larger original ballot
+	p.OriginalBallot = originalBallot.IncNumClone()
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.cmds, p.Cmds)
+
+	// smaller original ballot
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir = i.recoveryInfo
+	ir.ballot = originalBallot.IncNumClone()
+	i.handlePrepareReply(p)
+	assert.NotEqual(t, ir.cmds, p.Cmds)
+
+	// same original ballot but different deps or not initial or from leader
+	// It should not change its identicalcount
+
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir = i.recoveryInfo
+	p.Cmds, p.OriginalBallot = ir.cmds, ir.ballot
+	assert.NotEqual(t, ir.deps, p.Deps) // different deps
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.identicalCount, 0)
+
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir = i.recoveryInfo
+	ir.ballot.IncNumber()
+	p.Cmds, p.Deps = ir.cmds, ir.deps
+	p.OriginalBallot = ir.ballot.IncNumClone() // non initial
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.identicalCount, 0)
+
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir = i.recoveryInfo
+	p.Cmds, p.Deps, p.OriginalBallot = ir.cmds, ir.deps, ir.ballot
+	p.IsFromLeader = true // from leader
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.identicalCount, 0)
+
+	// receiving N/2 identical initial, broadcast accepts
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.enterPreparing()
+	ir = i.recoveryInfo
+	p.Cmds, p.Deps, p.OriginalBallot = ir.cmds, ir.deps, ir.ballot
+	p.IsFromLeader = false
+
+	for count := 0; count < i.replica.quorum(); count++ {
+		action, msg := i.handlePrepareReply(p)
+		if count != i.replica.quorum()-1 {
+			assert.Equal(t, action, noAction)
+			assert.Equal(t, ir.identicalCount, count+1)
+		} else {
+			assert.Equal(t, action, broadcastAction)
+			ac := msg.(*data.Accept)
+			assert.Equal(t, i.status, accepted)
+			assert.Equal(t, ac.Cmds, p.Cmds)
+		}
+	}
+}
+
 // **********************
 // ***** REJECTIONS *****
 // **********************
