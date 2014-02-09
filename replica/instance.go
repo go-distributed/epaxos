@@ -189,6 +189,12 @@ func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
 // - the instance is not newly created when
 // - - after reverted back from `preparing`(sender -> receiver)
 // - - received prepare and waiting for further message. (receiver)
+//
+// If a preparing instance as nilstatus handles prepare reply of
+// - committed reply, it should set its recovery info according to the reply
+// - accepted reply, it should set its recovery info according to the reply
+// - pre-accepted reply, it should set its recovery info according to the reply
+// - nilstatus reply, ignore
 func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preAccepted, accepted, committed, preparing)
 
@@ -936,9 +942,8 @@ func (i *Instance) enterPreparing() {
 	// - never seen anything concerning this instance before.
 	if i.freshlyCreated() {
 		// epoch.1.id
-		ballot := i.replica.makeInitialBallot()
-		ballot.SetNumber(1)
-		i.ballot = ballot
+		i.ballot = i.replica.makeInitialBallot()
+		i.ballot.IncNumber()
 	} else {
 		i.ballot.IncNumber()
 		i.ballot.SetReplicaId(i.replica.Id)

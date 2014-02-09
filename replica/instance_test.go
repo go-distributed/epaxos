@@ -1189,6 +1189,7 @@ func TestCommittedProccessWithPanic(t *testing.T) {
 // - committed reply, it should set its recovery info according to the reply
 // - accepted reply, it should set its recovery info according to the reply
 // - pre-accepted reply, it should set its recovery info according to the reply
+// - nilstatus reply, ignore
 func TestNilStatusPreparingHandlePrepareReply(t *testing.T) {
 	// committed reply
 	i := commonTestlibExamplePreParingInstance()
@@ -1233,6 +1234,14 @@ func TestNilStatusPreparingHandlePrepareReply(t *testing.T) {
 
 	i.handlePrepareReply(p)
 	assert.Equal(t, ir.status, preAccepted)
+
+	// nilstatus reply
+	i = commonTestlibExamplePreParingInstance()
+	ir = i.recoveryInfo
+	p.Status = nilStatus
+	i.handlePrepareReply(p)
+	assert.Equal(t, ir.status, nilStatus)
+	assert.NotEqual(t, ir.cmds, p.Cmds)
 }
 
 // **********************
