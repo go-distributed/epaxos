@@ -33,7 +33,7 @@ func (d Dependencies) Clone() Dependencies {
 	return deps
 }
 
-func (d Dependencies) Same(other Dependencies) bool {
+func (d Dependencies) SameAs(other Dependencies) bool {
 	if len(d) != len(other) {
 		panic("Same: different size!")
 	}

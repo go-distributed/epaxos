@@ -145,12 +145,12 @@ func (i *Instance) initRecoveryInfo() {
 	ir := i.recoveryInfo
 
 	ir.replyCount = 0
-	ir.cmds = i.cmds
-	ir.deps = i.deps
+	ir.cmds = i.cmds.Clone()
+	ir.deps = i.deps.Clone()
 	ir.status = i.status
 	ir.formerStatus = i.status
-	ir.formerBallot = i.ballot
-	ir.ballot = i.ballot
+	ir.formerBallot = i.ballot.Clone()
+	ir.ballot = i.ballot.Clone()
 
 	// preacceptcount is used to count N/2 identical initial preaccepts.
 	if i.isAtStatus(preAccepted) && i.ballot.IsInitialBallot() && i.rowId != i.replica.Id {
@@ -173,10 +173,8 @@ func (r *RecoveryInfo) statusIsAfter(status uint8) bool {
 }
 
 func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
-	if r.cmds == nil && p.Cmds != nil {
-		r.cmds = p.Cmds
-	}
-	r.seq, r.deps, r.ballot, r.status = p.Seq, p.Deps, p.Ballot, p.Status
+	r.cmds, r.seq, r.deps = p.Cmds, p.Seq, p.Deps
+	r.ballot, r.status = p.OriginalBallot, p.Status
 }
 
 // ******************************
@@ -662,13 +660,6 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		i.ballot = p.Ballot
 	}
 
-	cmds := data.Commands(nil)
-	// if the preparing instance know the commands (i.e. it has been told
-	// beforehand), we won't bother to serialize it over the network.
-	if p.NeedCmdsInReply {
-		cmds = i.cmds.Clone()
-	}
-
 	isFromLeader := false
 	if i.replica.Id == i.rowId {
 		isFromLeader = true
@@ -679,7 +670,7 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		ReplicaId:      i.rowId,
 		InstanceId:     i.id,
 		Status:         i.status,
-		Cmds:           cmds,
+		Cmds:           i.cmds.Clone(),
 		Seq:            i.seq,
 		Deps:           i.deps.Clone(),
 		Ballot:         p.Ballot.Clone(),
@@ -688,10 +679,35 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 	}
 }
 
+// This function handles the prepare reply and update recover info:
+// - committed reply
+// - accepted reply
+// - pre-accepted reply
+// - nilstatus (noop) reply
+// Broadcast action happesn when quorum replies are received, and
+// -
 // Assumption:
 // 1. Receive first N/2 replies.
 //   Even if we broadcast prepare to all, we only handle the first N/2 (positive)
-//   replies. This assumption pertains to the identical non-leader preaccepted counts.
+//   replies.
+//
+// If a preparing instance as nilstatus handles prepare reply of
+// - committed, it should set its recovery info according to the reply
+// - accepted, it should set its recovery info according to the reply
+// - pre-accepted, it should set its recovery info according to the reply
+// - nilstatus, ignore
+//
+// If a preparing instance as preaccepted handles prepare reply of
+// - committed, it should set its recovery info according to the reply
+// - accepted, it should set its recovery info according to the reply
+// - nilstatus, ignore
+// - pre-accepted, where original ballot compared to recovery ballot is
+// - - larger, set accordingly
+// - - smaller, ignore
+// - - same, but
+// - - - not initial or initial but from leader, ignore
+// Finally, send N/2 identical initial pre-accepted back, it should
+// broadcast accepts.
 func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg Message) {
 	if !i.isAtStatus(preparing) {
 		panic("")
@@ -716,7 +732,7 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 		return i.makeRecoveryDecision()
 	}
 
-	// We will wait until N/2 replies to jump to next action.
+	// We will wait until having received N/2 replies for next transition.
 	return noAction, nil
 }
 
@@ -775,17 +791,17 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 
 	if ir.statusIsBefore(preAccepted) {
 		ir.updateByPrepareReply(p)
-		if p.Ballot.IsInitialBallot() && !p.IsFromLeader {
+		if p.OriginalBallot.IsInitialBallot() && !p.IsFromLeader {
 			ir.identicalCount = 1
 		}
 		return
 	}
 
-	if ir.ballot.Compare(p.Ballot) > 0 {
+	if ir.ballot.Compare(p.OriginalBallot) > 0 {
 		return
 	}
 
-	if ir.ballot.Compare(p.Ballot) < 0 {
+	if ir.ballot.Compare(p.OriginalBallot) < 0 {
 		// Obviously, p.Ballot is not initial ballot,
 		// in this case, we won't send accept next.
 		ir.updateByPrepareReply(p)
@@ -793,19 +809,20 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 		return
 	}
 
-	if p.Ballot.IsInitialBallot() && !p.IsFromLeader &&
-		ir.deps.Same(p.Deps) {
+	if p.OriginalBallot.IsInitialBallot() && !p.IsFromLeader &&
+		ir.deps.SameAs(p.Deps) {
 		ir.identicalCount++
 	}
 }
 
+// This will load the cmds, seq, deps, ballot, status
+// from recovery info to the instance fields.
 func (i *Instance) loadRecoveryInfo() {
 	ir := i.recoveryInfo
 	i.cmds, i.seq, i.deps = ir.cmds, ir.seq, ir.deps
 	i.ballot, i.status = ir.ballot, ir.status
 }
 
-// TODO: Make up the message of returned!
 func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
 	i.loadRecoveryInfo()
 
@@ -937,12 +954,11 @@ func (i *Instance) enterPreparing() {
 	// - never seen anything concerning this instance before.
 	if i.freshlyCreated() {
 		// epoch.1.id
-		ballot := i.replica.makeInitialBallot()
-		ballot.SetNumber(1)
-		i.ballot = ballot
-	} else {
+		i.ballot = i.replica.makeInitialBallot()
 		i.ballot.IncNumber()
+	} else {
 		i.ballot.SetReplicaId(i.replica.Id)
+		i.ballot.IncNumber()
 	}
 
 	i.status = preparing

@@ -4,7 +4,6 @@ type Prepare struct {
 	ReplicaId       uint8
 	InstanceId      uint64
 	Ballot          *Ballot
-	NeedCmdsInReply bool
 }
 
 type PrepareReply struct {
