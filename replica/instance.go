@@ -59,7 +59,8 @@ type Instance struct {
 
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
-	isFastPath     bool
+	sameReplyDeps  bool
+	depsChanged    bool
 	preAcceptCount int
 	acceptCount    int
 }
@@ -101,7 +102,7 @@ func NewInstance(replica *Replica, rowId uint8, instanceId uint64) (i *Instance)
 
 func NewInstanceInfo() *InstanceInfo {
 	return &InstanceInfo{
-		isFastPath: true,
+		sameReplyDeps: true,
 	}
 }
 
@@ -132,11 +133,12 @@ func (i *Instance) freshlyCreated() bool {
 }
 
 func (i *Instance) ableToFastPath() bool {
-	return i.info.isFastPath && i.ballot.IsInitialBallot()
+	return i.info.sameReplyDeps && i.ballot.IsInitialBallot()
 }
 
 func (i *InstanceInfo) reset() {
-	i.isFastPath = true
+	i.depsChanged = false
+	i.sameReplyDeps = true
 	i.preAcceptCount = 0
 	i.acceptCount = 0
 }
@@ -493,6 +495,24 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	}
 }
 
+// common routine for judging next step for handle preaccept-ok and -reply
+func (i *Instance) commonPreAcceptNextStep() (action uint8, msg Message){
+	if i.info.preAcceptCount == i.replica.fastQuorum() && i.ableToFastPath() {
+		// TODO: persistent
+		i.enterCommitted()
+
+		return broadcastAction, i.makeCommit()
+	}
+
+	if i.info.preAcceptCount >= i.replica.quorum() && !i.ableToFastPath() {
+		// TODO: persistent
+		i.enterAcceptedAsSender()
+		return broadcastAction, i.makeAccept()
+	}
+
+	return noAction, nil
+}
+
 // handlePreAcceptOk handles PreAcceptOks,
 // one replica will receive PreAcceptOks only if it's the initial leader,
 // on receiving this message,
@@ -503,7 +523,22 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 // then it will broadcast Accepts,
 // - otherwise, do nothing
 func (i *Instance) handlePreAcceptOk(p *data.PreAcceptOk) (action uint8, msg Message) {
-	panic("")
+
+	if !i.ballot.IsInitialBallot() {
+		panic("")
+	}
+
+	// we would only send out initial pre-accepts to fast quorum
+	if i.info.preAcceptCount == i.replica.fastQuorum() {
+		panic("")
+	}
+
+	i.info.preAcceptCount++
+	if i.info.depsChanged {
+		i.info.sameReplyDeps = false
+	}
+
+        return i.commonPreAcceptNextStep()
 }
 
 // handlePreAcceptReply:
@@ -537,6 +572,16 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		return noAction, nil
 	}
 
+	if i.ableToFastPath() &&
+		i.info.preAcceptCount == i.replica.fastQuorum() {
+		// we only sent out initial pre-accepts to fast quorum
+		panic("")
+	}
+	if !i.ableToFastPath() &&
+		i.info.preAcceptCount >= i.replica.quorum() {
+		return noAction, nil
+	}
+
 	// update relevants
 	i.ballot = p.Ballot
 	i.info.preAcceptCount++
@@ -546,24 +591,12 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 	if same := i.deps.Union(p.Deps); !same {
 		// We take difference of deps only for replies from other replica.
 		if i.info.preAcceptCount > 1 {
-			i.info.isFastPath = false
+			i.info.sameReplyDeps = false
 		}
+		i.info.depsChanged = true
 	}
 
-	if i.info.preAcceptCount >= i.replica.fastQuorum() && i.ableToFastPath() {
-		// TODO: persistent
-		i.enterCommitted()
-
-		return broadcastAction, i.makeCommit()
-	}
-
-	if i.info.preAcceptCount >= i.replica.quorum() && !i.ableToFastPath() {
-		// TODO: persistent
-		i.enterAcceptedAsSender()
-		return broadcastAction, i.makeAccept()
-	}
-
-	return noAction, nil
+        return i.commonPreAcceptNextStep()
 }
 
 // handleAccept handles Accept messages (receiver)
@@ -615,6 +648,10 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 
 	if !a.Ok {
 		panic("")
+	}
+
+	if i.info.acceptCount == i.replica.quorum() {
+		return noAction, nil
 	}
 
 	i.info.acceptCount++
@@ -687,7 +724,7 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 // Broadcast action happesn when quorum replies are received, and
 // -
 // Assumption:
-// 1. Receive first N/2 replies.
+// 1. Receive only first N/2 replies.
 //   Even if we broadcast prepare to all, we only handle the first N/2 (positive)
 //   replies.
 //
@@ -722,6 +759,10 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 			panic("")
 		}
 		i.ballot = p.Ballot
+		return noAction, nil
+	}
+
+	if i.recoveryInfo.replyCount >= i.replica.quorum() {
 		return noAction, nil
 	}
 

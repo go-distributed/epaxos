@@ -88,7 +88,8 @@ func commonTestlibExamplePreParingInstance() *Instance {
 // commonTestlibCloneInstance returns a copy of an instance
 func commonTestlibCloneInstance(inst *Instance) *Instance {
 	copyInstanceInfo := &InstanceInfo{
-		isFastPath:     inst.info.isFastPath,
+		depsChanged:    inst.info.depsChanged,
+		sameReplyDeps:  inst.info.sameReplyDeps,
 		preAcceptCount: inst.info.preAcceptCount,
 		acceptCount:    inst.info.acceptCount,
 	}
@@ -180,7 +181,7 @@ func TestNilStatusProcessPropose(t *testing.T) {
 	})
 
 	assert.Equal(t, i.info.preAcceptCount, 0)
-	assert.True(t, i.info.isFastPath)
+	assert.True(t, i.info.sameReplyDeps)
 }
 
 func TestNilStatusProcessPreAccept(t *testing.T) {
@@ -578,34 +579,37 @@ func TestPreAcceptedProcessWithIgorePreAcceptOk(t *testing.T) {
 
 // TestPreAcceptedProcessWithHandlePreAcceptOk asserts that
 // when a pre-accepted instance receives a pre-accept-ok message, it
-// will handle the message if the instance is at its initial round
-//func TestPreAcceptedProcessWithHandlePreAcceptReply(t *testing.T) {
-//	// create a pre-accepted instance
-//	inst := commonTestlibExamplePreAcceptedInstance()
-//
-//	expectedInst := commonTestlibCloneInstance(inst)
-//	expectedInst.status = committed
-//
-//	inst.info.preAcceptCount = int(inst.replica.Size - 3)
-//
-//	// create and send a prepare message to the instance
-//	pr := &data.PreAcceptOk{}
-//	action, m := inst.preAcceptedProcess(pr)
-//
-//	// expect:
-//	// - action: broadcastAction
-//	// - message: accept with correct cmds, seq, deps
-//	// - instance: status == accepted
-//	assert.Equal(t, action, broadcastAction)
-//	assert.Equal(t, m, &data.Commit{
-//		Cmds:       inst.cmds,
-//		Seq:        expectSeq,
-//		Deps:       expectDeps,
-//		ReplicaId:  inst.replica.Id,
-//		InstanceId: inst.id,
-//	})
-//	assert.Equal(t, inst, expectedInst)
-//}
+// will handle the message if the instance is at its initial round.
+// Otherwise it should panic.
+func TestPreAcceptedProcessWithHandlePreAcceptOk(t *testing.T) {
+	// create a pre-accepted instance
+	i := commonTestlibExamplePreAcceptedInstance()
+
+	expectedInst := commonTestlibCloneInstance(i)
+	expectedInst.status = committed
+	expectedInst.info.preAcceptCount = i.replica.fastQuorum()
+
+	i.info.preAcceptCount = i.replica.fastQuorum() - 1
+
+	// create and send a prepare message to the instance
+	pr := &data.PreAcceptOk{}
+	action, m := i.preAcceptedProcess(pr)
+
+	// expect:
+	// - action: broadcastAction
+	// - message: accept with correct cmds, seq, deps
+	// - instance: status == accepted
+	assert.Equal(t, action, broadcastAction)
+	assert.Equal(t, m, &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       i.cmds,
+		Seq:        i.seq,
+		Deps:       i.deps,
+	})
+
+	assert.Equal(t, i, expectedInst)
+}
 
 // TestPreAcceptedProcessWithPrepareReply asserts that
 // on receiving prepare-reply message, preaccepted instance will:
