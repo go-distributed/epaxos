@@ -1,9 +1,9 @@
 package data
 
 type Prepare struct {
-	ReplicaId       uint8
-	InstanceId      uint64
-	Ballot          *Ballot
+	ReplicaId  uint8
+	InstanceId uint64
+	Ballot     *Ballot
 }
 
 type PrepareReply struct {

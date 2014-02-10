@@ -502,6 +502,9 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 }
 
 // common routine for judging next step for handle preaccept-ok and -reply
+// The requirement for fast path is:
+// - all seq, deps in replies are the same.
+// - initial ballot (first round from propose)
 func (i *Instance) commonPreAcceptedNextStep() (action uint8, msg Message) {
 	if i.info.preAcceptCount == i.replica.fastQuorum() && i.ableToFastPath() {
 		// TODO: persistent
@@ -583,8 +586,8 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 	}
 
 	// update relevants
-	i.ballot = p.Ballot
 	i.info.preAcceptCount++
+
 	// seq  = max(seq from all replies)
 	if p.Seq > i.seq {
 		i.seq = p.Seq
@@ -594,7 +597,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		i.info.seqChanged = true
 	}
 	// deps = union(deps from all replies)
-	if same := i.deps.Union(p.Deps); !same {
+	if changed := i.deps.Union(p.Deps); changed {
 		// We take difference of deps only for replies from other replica.
 		if i.info.preAcceptCount > 1 {
 			i.info.sameDepsAndSeq = false
@@ -856,6 +859,10 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 		return
 	}
 
+        // original leader could go on fast path if
+        // * initial ballot
+        // * not from leader
+        // * identical deps and seq
 	if p.OriginalBallot.IsInitialBallot() && !p.IsFromLeader &&
 		ir.deps.SameAs(p.Deps) && ir.seq == p.Seq {
 		ir.identicalCount++

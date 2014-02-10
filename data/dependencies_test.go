@@ -28,16 +28,16 @@ func TestUnion(t *testing.T) {
 	for i := range other {
 		other[i] = uint64(i)
 	}
-	same := self.Union(other)
-	assert.True(t, same)
+	changed := self.Union(other)
+	assert.False(t, changed)
 
 	other = make(Dependencies, 5)
 	for i := range other {
 		other[i] = uint64(5 - i)
 	}
-	same = self.Union(other)
+	changed = self.Union(other)
 
-	assert.False(t, same)
+	assert.True(t, changed)
 	assert.Equal(t, self, Dependencies{5, 4, 3, 3, 4})
 }
 
@@ -58,20 +58,19 @@ func TestDependenciesNilPanic(t *testing.T) {
 	d = nil
 	assert.Panics(t, func() { d.Clone() })
 }
-
-func TestDependenciesSame(t *testing.T) {
+func TestDependenciesSameAs(t *testing.T) {
 	self := make(Dependencies, 5)
 	for i := range self {
 		self[i] = uint64(i)
 	}
 	other := self.Clone()
-	assert.True(t, self.Same(other))
+	assert.True(t, self.SameAs(other))
 
 	for i := range other {
 		other[i] = uint64(len(other) - i)
 	}
-	assert.False(t, self.Same(other))
+	assert.False(t, self.SameAs(other))
 
 	other = make(Dependencies, 4)
-	assert.Panics(t, func() { self.Same(other) })
+	assert.Panics(t, func() { self.SameAs(other) })
 }

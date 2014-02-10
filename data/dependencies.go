@@ -3,7 +3,7 @@ package data
 type Dependencies []uint64
 
 // union unions the deps into the receiver
-// return true if deps are same
+// return true if deps are changed
 func (d Dependencies) Union(other Dependencies) bool {
 	if d == nil || other == nil {
 		panic("Union: dependencis should not be nil")
@@ -12,16 +12,16 @@ func (d Dependencies) Union(other Dependencies) bool {
 		panic("Union: size different!")
 	}
 
-	same := true
+	changed := false
 	for i := range d {
 		if d[i] != other[i] {
-			same = false
 			if d[i] < other[i] {
 				d[i] = other[i]
+				changed = true
 			}
 		}
 	}
-	return same
+	return changed
 }
 
 func (d Dependencies) Clone() Dependencies {

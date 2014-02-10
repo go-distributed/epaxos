@@ -28,7 +28,11 @@ func commonTestlibExampleDeps() data.Dependencies {
 }
 
 func commonTestlibUnionedDeps() data.Dependencies {
-	return data.Dependencies{1, 2, 2, 3, 8}
+	deps := commonTestlibExampleDeps()
+	deps.Union(data.Dependencies{
+		0, 1, 2, 3, 4,
+	})
+	return deps
 }
 
 func commonTestlibExampleInstance() *Instance {
@@ -88,9 +92,9 @@ func commonTestlibExamplePreParingInstance() *Instance {
 // commonTestlibCloneInstance returns a copy of an instance
 func commonTestlibCloneInstance(inst *Instance) *Instance {
 	copyInstanceInfo := &InstanceInfo{
-		seqChanged:    inst.info.seqChanged,
+		seqChanged:     inst.info.seqChanged,
 		depsChanged:    inst.info.depsChanged,
-		sameDepsAndSeq:  inst.info.sameDepsAndSeq,
+		sameDepsAndSeq: inst.info.sameDepsAndSeq,
 		preAcceptCount: inst.info.preAcceptCount,
 		acceptCount:    inst.info.acceptCount,
 	}
@@ -377,7 +381,7 @@ func TestPreAcceptedProcessWithHandleCommit(t *testing.T) {
 
 	// create expected cmds, seq and deps
 	expectedCmds := commonTestlibExampleCommands()
-	expectedSeq := uint32(38)
+	expectedSeq := inst.seq + 1
 	expectedDeps := commonTestlibExampleDeps()
 
 	expectedInst := commonTestlibCloneInstance(inst)
@@ -552,21 +556,73 @@ func TestPreAcceptedProcessWithHandlePreAcceptReply(t *testing.T) {
 	assert.Equal(t, inst, expectedInst)
 }
 
-// **************
-// The following two tests focus on receiving preaccept-ok/-reply to test different
-// cases and fast/slow path of epaxos
-// **************
+// **********************
+// **** FAST PATH *******
+// **********************
 
+// preaccepted instance should go fast path,
+// - on receiving fast quorum of preaccept-ok;
 func TestPreAcceptedFastPath(t *testing.T) {
 	i := commonTestlibExamplePreAcceptedInstance()
 	// shold be initial round
 	assert.True(t, i.ballot.IsInitialBallot())
 
-	p := &data.PreAcceptOk{InstanceId: i.id}
+	reply := &data.PreAcceptOk{InstanceId: i.id}
+	oldSeq := i.seq
 
-	i.preAcceptedProcess(p)
+	for count := 0; count < i.replica.fastQuorum(); count++ {
+		action, msg := i.preAcceptedProcess(reply)
+		if count != i.replica.fastQuorum()-1 {
+			assert.Equal(t, i.status, preAccepted)
+			assert.Equal(t, i.info.preAcceptCount, count+1)
+			assert.True(t, i.info.sameDepsAndSeq)
+			assert.Equal(t, action, noAction)
+		} else {
+			p := msg.(*data.Commit)
+			assert.Equal(t, action, broadcastAction)
+			assert.Equal(t, i.status, committed)
+			assert.Equal(t, p.Seq, oldSeq)
+		}
+	}
 }
 
+// - on receiving fast quorum of identical preaccept-reply;
+func TestPreAcceptedFastPath2(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
+	// shold be initial round
+	assert.True(t, i.ballot.IsInitialBallot())
+
+	reply := &data.PreAcceptReply{
+		Ok:         true,
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Seq:        i.seq + 1,
+		Deps:       commonTestlibExampleDeps(),
+		Ballot:     i.ballot,
+	}
+
+	for count := 0; count < i.replica.fastQuorum(); count++ {
+		action, msg := i.preAcceptedProcess(reply)
+		if count != i.replica.fastQuorum()-1 {
+			assert.Equal(t, i.status, preAccepted)
+			assert.Equal(t, i.info.preAcceptCount, count+1)
+			assert.True(t, i.info.sameDepsAndSeq)
+			assert.True(t, i.info.depsChanged)
+			assert.True(t, i.info.seqChanged)
+			assert.Equal(t, i.seq, reply.Seq)
+			assert.Equal(t, i.deps, commonTestlibUnionedDeps())
+			assert.Equal(t, action, noAction)
+		} else {
+			p := msg.(*data.Commit)
+			assert.Equal(t, action, broadcastAction)
+			assert.Equal(t, i.status, committed)
+			assert.Equal(t, p.Seq, reply.Seq)
+			assert.Equal(t, p.Deps, commonTestlibUnionedDeps())
+		}
+	}
+}
+
+// preaccepted instance should go fast path,
 func TestPreAcceptedSlowPath(t *testing.T) {
 }
 
