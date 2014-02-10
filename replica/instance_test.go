@@ -88,8 +88,9 @@ func commonTestlibExamplePreParingInstance() *Instance {
 // commonTestlibCloneInstance returns a copy of an instance
 func commonTestlibCloneInstance(inst *Instance) *Instance {
 	copyInstanceInfo := &InstanceInfo{
+		seqChanged:    inst.info.seqChanged,
 		depsChanged:    inst.info.depsChanged,
-		sameReplyDeps:  inst.info.sameReplyDeps,
+		sameDepsAndSeq:  inst.info.sameDepsAndSeq,
 		preAcceptCount: inst.info.preAcceptCount,
 		acceptCount:    inst.info.acceptCount,
 	}
@@ -181,7 +182,7 @@ func TestNilStatusProcessPropose(t *testing.T) {
 	})
 
 	assert.Equal(t, i.info.preAcceptCount, 0)
-	assert.True(t, i.info.sameReplyDeps)
+	assert.True(t, i.info.sameDepsAndSeq)
 }
 
 func TestNilStatusProcessPreAccept(t *testing.T) {
@@ -551,30 +552,22 @@ func TestPreAcceptedProcessWithHandlePreAcceptReply(t *testing.T) {
 	assert.Equal(t, inst, expectedInst)
 }
 
-// TestPreAcceptedProcessWithIgorePreAcceptOk asserts that
-// on receiving smaller ballot preaccept-ok, preaccepted instance will ignore it.
-func TestPreAcceptedProcessWithIgorePreAcceptOk(t *testing.T) {
-	// create a pre-accepted instance
-	inst := commonTestlibExamplePreAcceptedInstance()
+// **************
+// The following two tests focus on receiving preaccept-ok/-reply to test different
+// cases and fast/slow path of epaxos
+// **************
 
-	// create small and large ballots
-	initialBallot := inst.replica.makeInitialBallot()
-	largerBallot := initialBallot.IncNumClone()
+func TestPreAcceptedFastPath(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
+	// shold be initial round
+	assert.True(t, i.ballot.IsInitialBallot())
 
-	inst.ballot = largerBallot
-	expectedInst := commonTestlibCloneInstance(inst)
+	p := &data.PreAcceptOk{InstanceId: i.id}
 
-	// create and send a prepare message to the instance
-	pr := &data.PreAcceptOk{}
-	action, m := inst.preAcceptedProcess(pr)
+	i.preAcceptedProcess(p)
+}
 
-	// expect:
-	// - action: noAction
-	// - message: nil
-	// - instance: nothing changed
-	assert.Equal(t, action, noAction)
-	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectedInst)
+func TestPreAcceptedSlowPath(t *testing.T) {
 }
 
 // TestPreAcceptedProcessWithHandlePreAcceptOk asserts that
@@ -1275,7 +1268,7 @@ func TestPreAcceptedPreparingHandlePrepareReply(t *testing.T) {
 		ReplicaId:      i.rowId,
 		InstanceId:     i.id,
 		Cmds:           commonTestlibExampleCommands(),
-		Seq:            i.seq + 1,
+		Seq:            i.seq,
 		Deps:           commonTestlibExampleDeps(),
 		Ballot:         messageBallot,
 		OriginalBallot: originalBallot,

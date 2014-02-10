@@ -3,17 +3,21 @@ package replica
 // This file implements instance module.
 // @assumption:
 // - When a replica pass in the message to instance methods, we assume that the
-//    internal fields of message is readable only and safe to reference to, except deps.
+//   internal fields of message is readable only and safe to reference to, except deps.
 // @assumption(02/01/14):
 // - When a new instance is created, it's at nilstatus.
 // @decision (01/31/14):
 // - Status has precedence. An accepted instance won't handle pre-accept even if
-// - the pre-accept carries larger ballot.
+//   the pre-accept carries larger ballot.
+// - nilstatus < pre-accepted < accepted < committed
 // @decision (02/01/14):
 // - Executed won't be included in instance statuses anymore.
 // - Executed will be recorded in a flag. This will simplify the state machine.
 // @decision (02/05/14):
 // - No-op == Commands(nil)
+// @assumption (02/10/14):
+// - In initial round, replica will broadcast preaccept to fast quorum.
+// - In later rounds, replica will broadcast to all from preparing.
 
 import (
 	"fmt"
@@ -59,8 +63,9 @@ type Instance struct {
 
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
-	sameReplyDeps  bool
+	sameDepsAndSeq bool
 	depsChanged    bool
+	seqChanged     bool
 	preAcceptCount int
 	acceptCount    int
 }
@@ -102,7 +107,7 @@ func NewInstance(replica *Replica, rowId uint8, instanceId uint64) (i *Instance)
 
 func NewInstanceInfo() *InstanceInfo {
 	return &InstanceInfo{
-		sameReplyDeps: true,
+		sameDepsAndSeq: true,
 	}
 }
 
@@ -133,12 +138,13 @@ func (i *Instance) freshlyCreated() bool {
 }
 
 func (i *Instance) ableToFastPath() bool {
-	return i.info.sameReplyDeps && i.ballot.IsInitialBallot()
+	return i.info.sameDepsAndSeq && i.ballot.IsInitialBallot()
 }
 
 func (i *InstanceInfo) reset() {
 	i.depsChanged = false
-	i.sameReplyDeps = true
+	i.seqChanged = false
+	i.sameDepsAndSeq = true
 	i.preAcceptCount = 0
 	i.acceptCount = 0
 }
@@ -148,6 +154,7 @@ func (i *Instance) initRecoveryInfo() {
 
 	ir.replyCount = 0
 	ir.cmds = i.cmds.Clone()
+	ir.seq = i.seq
 	ir.deps = i.deps.Clone()
 	ir.status = i.status
 	ir.formerStatus = i.status
@@ -230,9 +237,8 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 	}
 }
 
-// preAccepted instance can be of two stands:
-// - as a sender
-// - as a receiver
+// preaccepted instance
+// - handles preaccept-ok/-reply, preaccept, accept, commit, and prepare.
 func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 	defer i.checkStatus(preAccepted, accepted, committed)
 
@@ -496,7 +502,7 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 }
 
 // common routine for judging next step for handle preaccept-ok and -reply
-func (i *Instance) commonPreAcceptNextStep() (action uint8, msg Message){
+func (i *Instance) commonPreAcceptedNextStep() (action uint8, msg Message) {
 	if i.info.preAcceptCount == i.replica.fastQuorum() && i.ableToFastPath() {
 		// TODO: persistent
 		i.enterCommitted()
@@ -514,16 +520,15 @@ func (i *Instance) commonPreAcceptNextStep() (action uint8, msg Message){
 }
 
 // handlePreAcceptOk handles PreAcceptOks,
-// one replica will receive PreAcceptOks only if it's the initial leader,
-// on receiving this message,
-// it will increase the preAcceptCount, and do broadcasts if:
-// - the preAcceptCount >= the size of fast quorum, and all replies are
-// the same, then it will broadcast Commits,
-// - the preAcceptCount >= N/2(not including the sender), and not all replies are equal,
-// then it will broadcast Accepts,
+// One replica will receive PreAcceptOks only if it's the initial leader,
+// On receiving this message,
+// it will increment the preAcceptCount, and if
+// - preAcceptCount >= the size of fast quorum, and all replies are
+//   the same, then it will broadcast Commits,
+// - preAcceptCount >= N/2(not including the sender), and not all replies are equal,
+//   then it will broadcast Accepts,
 // - otherwise, do nothing
 func (i *Instance) handlePreAcceptOk(p *data.PreAcceptOk) (action uint8, msg Message) {
-
 	if !i.ballot.IsInitialBallot() {
 		panic("")
 	}
@@ -534,11 +539,11 @@ func (i *Instance) handlePreAcceptOk(p *data.PreAcceptOk) (action uint8, msg Mes
 	}
 
 	i.info.preAcceptCount++
-	if i.info.depsChanged {
-		i.info.sameReplyDeps = false
+	if i.info.depsChanged || i.info.seqChanged {
+		i.info.sameDepsAndSeq = false
 	}
 
-        return i.commonPreAcceptNextStep()
+	return i.commonPreAcceptedNextStep()
 }
 
 // handlePreAcceptReply:
@@ -560,11 +565,6 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		panic("")
 	}
 	if p.Ballot.Compare(i.ballot) > 0 {
-
-		// [*] there may be stale but large ballots,
-		// if we receive such ballots, that means there may be another newer proposer,
-		// so we'd better step down by increasing our own ballot so we can ignore
-		// the following replies.
 		if p.Ok {
 			panic("")
 		}
@@ -585,18 +585,24 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 	// update relevants
 	i.ballot = p.Ballot
 	i.info.preAcceptCount++
+	// seq  = max(seq from all replies)
 	if p.Seq > i.seq {
 		i.seq = p.Seq
+		if i.info.preAcceptCount > 1 {
+			i.info.sameDepsAndSeq = false
+		}
+		i.info.seqChanged = true
 	}
+	// deps = union(deps from all replies)
 	if same := i.deps.Union(p.Deps); !same {
 		// We take difference of deps only for replies from other replica.
 		if i.info.preAcceptCount > 1 {
-			i.info.sameReplyDeps = false
+			i.info.sameDepsAndSeq = false
 		}
 		i.info.depsChanged = true
 	}
 
-        return i.commonPreAcceptNextStep()
+	return i.commonPreAcceptedNextStep()
 }
 
 // handleAccept handles Accept messages (receiver)
@@ -851,7 +857,7 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 
 	if p.OriginalBallot.IsInitialBallot() && !p.IsFromLeader &&
-		ir.deps.SameAs(p.Deps) {
+		ir.deps.SameAs(p.Deps) && ir.seq == p.Seq {
 		ir.identicalCount++
 	}
 }
