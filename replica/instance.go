@@ -139,8 +139,24 @@ func (i *Instance) freshlyCreated() bool {
 
 // This is used to check when handling preaccept-reply messages,
 // can this instance could still go to fast path
+//
+// we are not able to commit on past path if the following happens
+//
+// 1, not all replies are the same
+// 2, we are not in the initial round.
+//
+// And for condition 1, we have two cases:
+//
+// a, not all preAcceptReplies are the same
+// b, we have received both preAcceptReplies and preAcceptOks
+func (i *Instance) notAbleToFastPath() bool {
+	return !i.info.samePreAcceptReplies ||
+		!i.ballot.IsInitialBallot() ||
+		(i.info.preAcceptOkCount > 0 && i.info.preAcceptReplyCount > 0)
+}
+
 func (i *Instance) ableToFastPath() bool {
-	return i.info.samePreAcceptReplies && i.ballot.IsInitialBallot()
+	return !i.notAbleToFastPath()
 }
 
 func (i *InstanceInfo) reset() {
@@ -524,9 +540,7 @@ func (i *Instance) commonPreAcceptedNextStep() (action uint8, msg Message) {
 	// slow path, we received quorum of
 	// - replies and they don't satisfy fast path.
 	// - a mix of preacept-ok/-reply implies different seq and deps.
-	if replyCount >= i.replica.quorum() && !i.ableToFastPath() ||
-		replyCount+okCount >= i.replica.quorum() &&
-			replyCount > 0 && okCount > 0 {
+	if okCount+replyCount >= i.replica.quorum() && !i.ableToFastPath() {
 		// TODO: persistent
 		i.enterAcceptedAsSender()
 		return broadcastAction, i.makeAccept()
