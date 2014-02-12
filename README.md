@@ -8,7 +8,7 @@ A Go implementation of epaxos
 
 Summary
 ------
-This is credited to [efficient/epaxos](https://github.com/efficient/epaxos).
+This section is credited to [efficient/epaxos](https://github.com/efficient/epaxos).
 
 ### What is EPaxos?
 

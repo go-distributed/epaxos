@@ -582,7 +582,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 	}
 	if !i.ableToFastPath() &&
 		i.info.preAcceptCount >= i.replica.quorum() {
-		return noAction, nil
+		panic("")
 	}
 
 	// update relevants
@@ -660,7 +660,7 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 	}
 
 	if i.info.acceptCount == i.replica.quorum() {
-		return noAction, nil
+		panic("")
 	}
 
 	i.info.acceptCount++
@@ -772,7 +772,7 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 	}
 
 	if i.recoveryInfo.replyCount >= i.replica.quorum() {
-		return noAction, nil
+		panic("")
 	}
 
 	i.updateRecoveryInstance(p)
@@ -859,10 +859,10 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 		return
 	}
 
-        // original leader could go on fast path if
-        // * initial ballot
-        // * not from leader
-        // * identical deps and seq
+	// original leader could go on fast path if
+	// * initial ballot
+	// * not from leader
+	// * identical deps and seq
 	if p.OriginalBallot.IsInitialBallot() && !p.IsFromLeader &&
 		ir.deps.SameAs(p.Deps) && ir.seq == p.Seq {
 		ir.identicalCount++

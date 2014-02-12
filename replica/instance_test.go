@@ -330,7 +330,7 @@ func TestPreAcceptedProcessWithHandleAccept(t *testing.T) {
 
 	// create expected cmds, seq and deps
 	expectedCmds := commonTestlibExampleCommands()
-	expectedSeq := uint32(38)
+	expectedSeq := uint32(inst.seq + 1)
 	expectedDeps := commonTestlibExampleDeps()
 
 	expectedInst := commonTestlibCloneInstance(inst)
@@ -363,6 +363,8 @@ func TestPreAcceptedProcessWithHandleAccept(t *testing.T) {
 	assert.Equal(t, inst, expectedInst)
 
 	// test larger ballot accept
+	// the above one is test both in same ballot. here the accept ballot is larger.
+	inst = commonTestlibExamplePreAcceptedInstance()
 	inst.status = preAccepted
 	ac.Ballot = largerBallot
 	_, reply = inst.preAcceptedProcess(ac)
@@ -621,6 +623,10 @@ func TestPreAcceptedFastPath2(t *testing.T) {
 		}
 	}
 }
+
+// **********************
+// **** SLOW PATH *******
+// **********************
 
 // preaccepted instance should go fast path,
 func TestPreAcceptedSlowPath(t *testing.T) {
