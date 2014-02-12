@@ -108,6 +108,9 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 		}
 	}
 	i.cmds, i.seq, i.deps = cmds, seq, deps
+	// we can only update here because
+	// now we are safe to have cmds, etc. inside instance
+	i.replica.updateMaxInstanceNum(i.rowId, i.id)
 }
 
 // This func updates the passed in dependencies from replica[from].
@@ -134,6 +137,9 @@ func (r *Replica) updateInstance(cmds data.Commands, seq uint32, deps data.Depen
 	}
 
 	i.cmds, i.seq, i.deps = cmds, seq, deps
+	// we can only update here because
+	// now we are safe to have cmds, etc. inside instance
+	i.replica.updateMaxInstanceNum(i.rowId, i.id)
 	return changed
 }
 
