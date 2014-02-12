@@ -63,11 +63,11 @@ type Instance struct {
 
 // bookkeeping struct for recording counts of different messages and some flags
 type InstanceInfo struct {
-	sameDepsAndSeq bool
-	depsChanged    bool
-	seqChanged     bool
-	preAcceptCount int
-	acceptCount    int
+	samePreAcceptReplies bool
+
+	preAcceptOkCount    int
+	preAcceptReplyCount int
+	acceptReplyCount    int
 }
 
 // recovery info will keep information of the instance info that we will send out on
@@ -107,7 +107,7 @@ func NewInstance(replica *Replica, rowId uint8, instanceId uint64) (i *Instance)
 
 func NewInstanceInfo() *InstanceInfo {
 	return &InstanceInfo{
-		sameDepsAndSeq: true,
+		samePreAcceptReplies: true,
 	}
 }
 
@@ -137,16 +137,17 @@ func (i *Instance) freshlyCreated() bool {
 	return i.ballot.Epoch() == 0
 }
 
+// This is used to check when handling preaccept-reply messages,
+// can this instance could still go to fast path
 func (i *Instance) ableToFastPath() bool {
-	return i.info.sameDepsAndSeq && i.ballot.IsInitialBallot()
+	return i.info.samePreAcceptReplies && i.ballot.IsInitialBallot()
 }
 
 func (i *InstanceInfo) reset() {
-	i.depsChanged = false
-	i.seqChanged = false
-	i.sameDepsAndSeq = true
-	i.preAcceptCount = 0
-	i.acceptCount = 0
+	i.samePreAcceptReplies = true
+	i.preAcceptOkCount = 0
+	i.preAcceptReplyCount = 0
+	i.acceptReplyCount = 0
 }
 
 func (i *Instance) initRecoveryInfo() {
@@ -506,14 +507,26 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 // - all seq, deps in replies are the same.
 // - initial ballot (first round from propose)
 func (i *Instance) commonPreAcceptedNextStep() (action uint8, msg Message) {
-	if i.info.preAcceptCount == i.replica.fastQuorum() && i.ableToFastPath() {
+	replyCount := i.info.preAcceptReplyCount
+	okCount := i.info.preAcceptOkCount
+
+	// fast path, we received fast quourm of
+	// - all preaccept-ok
+	// - all preaccept-reply same (implied in abletofastpath())
+	// and they satisfy fast path (initial ballot)
+	if okCount == i.replica.fastQuorum() ||
+		replyCount == i.replica.fastQuorum() && i.ableToFastPath() {
 		// TODO: persistent
 		i.enterCommitted()
-
 		return broadcastAction, i.makeCommit()
 	}
 
-	if i.info.preAcceptCount >= i.replica.quorum() && !i.ableToFastPath() {
+	// slow path, we received quorum of
+	// - replies and they don't satisfy fast path.
+	// - a mix of preacept-ok/-reply implies different seq and deps.
+	if replyCount >= i.replica.quorum() && !i.ableToFastPath() ||
+		replyCount+okCount >= i.replica.quorum() &&
+			replyCount > 0 && okCount > 0 {
 		// TODO: persistent
 		i.enterAcceptedAsSender()
 		return broadcastAction, i.makeAccept()
@@ -525,10 +538,10 @@ func (i *Instance) commonPreAcceptedNextStep() (action uint8, msg Message) {
 // handlePreAcceptOk handles PreAcceptOks,
 // One replica will receive PreAcceptOks only if it's the initial leader,
 // On receiving this message,
-// it will increment the preAcceptCount, and if
-// - preAcceptCount >= the size of fast quorum, and all replies are
+// it will increment the preAcceptReplyCount, and if
+// - preAcceptReplyCount >= the size of fast quorum, and all replies are
 //   the same, then it will broadcast Commits,
-// - preAcceptCount >= N/2(not including the sender), and not all replies are equal,
+// - preAcceptReplyCount >= N/2(not including the sender), and not all replies are equal,
 //   then it will broadcast Accepts,
 // - otherwise, do nothing
 func (i *Instance) handlePreAcceptOk(p *data.PreAcceptOk) (action uint8, msg Message) {
@@ -537,14 +550,11 @@ func (i *Instance) handlePreAcceptOk(p *data.PreAcceptOk) (action uint8, msg Mes
 	}
 
 	// we would only send out initial pre-accepts to fast quorum
-	if i.info.preAcceptCount == i.replica.fastQuorum() {
+	if i.info.preAcceptOkCount == i.replica.fastQuorum() {
 		panic("")
 	}
 
-	i.info.preAcceptCount++
-	if i.info.depsChanged || i.info.seqChanged {
-		i.info.sameDepsAndSeq = false
-	}
+	i.info.preAcceptOkCount++
 
 	return i.commonPreAcceptedNextStep()
 }
@@ -575,34 +585,23 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 		return noAction, nil
 	}
 
-	if i.ableToFastPath() &&
-		i.info.preAcceptCount == i.replica.fastQuorum() {
-		// we only sent out initial pre-accepts to fast quorum
-		panic("")
-	}
-	if !i.ableToFastPath() &&
-		i.info.preAcceptCount >= i.replica.quorum() {
-		panic("")
-	}
-
-	// update relevants
-	i.info.preAcceptCount++
+	i.info.preAcceptReplyCount++
 
 	// seq  = max(seq from all replies)
-	if p.Seq > i.seq {
-		i.seq = p.Seq
-		if i.info.preAcceptCount > 1 {
-			i.info.sameDepsAndSeq = false
+	if p.Seq != i.seq {
+		if p.Seq > i.seq {
+			i.seq = p.Seq
 		}
-		i.info.seqChanged = true
+		if i.info.preAcceptReplyCount > 1 {
+			i.info.samePreAcceptReplies = false
+		}
 	}
 	// deps = union(deps from all replies)
-	if changed := i.deps.Union(p.Deps); changed {
+	if same := i.deps.Union(p.Deps); !same {
 		// We take difference of deps only for replies from other replica.
-		if i.info.preAcceptCount > 1 {
-			i.info.sameDepsAndSeq = false
+		if i.info.preAcceptReplyCount > 1 {
+			i.info.samePreAcceptReplies = false
 		}
-		i.info.depsChanged = true
 	}
 
 	return i.commonPreAcceptedNextStep()
@@ -659,12 +658,12 @@ func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *da
 		panic("")
 	}
 
-	if i.info.acceptCount == i.replica.quorum() {
+	if i.info.acceptReplyCount == i.replica.quorum() {
 		panic("")
 	}
 
-	i.info.acceptCount++
-	if i.info.acceptCount >= i.replica.quorum() {
+	i.info.acceptReplyCount++
+	if i.info.acceptReplyCount >= i.replica.quorum() {
 		i.enterCommitted()
 		return broadcastAction, i.makeCommit()
 	}

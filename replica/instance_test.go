@@ -92,11 +92,10 @@ func commonTestlibExamplePreParingInstance() *Instance {
 // commonTestlibCloneInstance returns a copy of an instance
 func commonTestlibCloneInstance(inst *Instance) *Instance {
 	copyInstanceInfo := &InstanceInfo{
-		seqChanged:     inst.info.seqChanged,
-		depsChanged:    inst.info.depsChanged,
-		sameDepsAndSeq: inst.info.sameDepsAndSeq,
-		preAcceptCount: inst.info.preAcceptCount,
-		acceptCount:    inst.info.acceptCount,
+		samePreAcceptReplies: inst.info.samePreAcceptReplies,
+		preAcceptOkCount:     inst.info.preAcceptOkCount,
+		preAcceptReplyCount:  inst.info.preAcceptReplyCount,
+		acceptReplyCount:     inst.info.acceptReplyCount,
 	}
 
 	ir := inst.recoveryInfo
@@ -185,8 +184,8 @@ func TestNilStatusProcessPropose(t *testing.T) {
 		Ballot:     i.replica.makeInitialBallot(),
 	})
 
-	assert.Equal(t, i.info.preAcceptCount, 0)
-	assert.True(t, i.info.sameDepsAndSeq)
+	assert.Equal(t, i.info.preAcceptReplyCount, 0)
+	assert.True(t, i.info.samePreAcceptReplies)
 }
 
 func TestNilStatusProcessPreAccept(t *testing.T) {
@@ -532,7 +531,7 @@ func TestPreAcceptedProcessWithHandlePreAcceptReply(t *testing.T) {
 	expectedInst.seq = expectedSeq
 	expectedInst.deps = expectedDeps
 
-	inst.info.preAcceptCount = inst.replica.quorum() - 1
+	inst.info.preAcceptReplyCount = inst.replica.quorum() - 1
 
 	// create and send a prepare message to the instance
 	pr := &data.PreAcceptReply{
@@ -576,8 +575,8 @@ func TestPreAcceptedFastPath(t *testing.T) {
 		action, msg := i.preAcceptedProcess(reply)
 		if count != i.replica.fastQuorum()-1 {
 			assert.Equal(t, i.status, preAccepted)
-			assert.Equal(t, i.info.preAcceptCount, count+1)
-			assert.True(t, i.info.sameDepsAndSeq)
+			assert.Equal(t, i.info.preAcceptOkCount, count+1)
+			assert.True(t, i.info.samePreAcceptReplies)
 			assert.Equal(t, action, noAction)
 		} else {
 			p := msg.(*data.Commit)
@@ -594,6 +593,46 @@ func TestPreAcceptedFastPath2(t *testing.T) {
 	// shold be initial round
 	assert.True(t, i.ballot.IsInitialBallot())
 
+	newerDeps := i.deps
+	newerDeps[i.rowId+1]++
+
+	reply := &data.PreAcceptReply{
+		Ok:         true,
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Seq:        i.seq + 1,
+		Deps:       newerDeps,
+		Ballot:     i.ballot,
+	}
+
+	for count := 0; count < i.replica.fastQuorum(); count++ {
+		action, msg := i.preAcceptedProcess(reply)
+		if count != i.replica.fastQuorum()-1 {
+			assert.Equal(t, i.status, preAccepted)
+			assert.Equal(t, i.info.preAcceptReplyCount, count+1)
+			assert.True(t, i.info.samePreAcceptReplies)
+			assert.Equal(t, i.seq, reply.Seq)
+			assert.Equal(t, i.deps, newerDeps)
+			assert.Equal(t, action, noAction)
+		} else {
+			p := msg.(*data.Commit)
+			assert.Equal(t, action, broadcastAction)
+			assert.Equal(t, i.status, committed)
+			assert.Equal(t, p.Seq, reply.Seq)
+			assert.Equal(t, p.Deps, newerDeps)
+		}
+	}
+}
+
+// **********************
+// **** SLOW PATH *******
+// **********************
+
+// preaccepted instance should go slow path,
+// - on receiving different pre-accept replies.
+func TestPreAcceptedSlowPath(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
+
 	reply := &data.PreAcceptReply{
 		Ok:         true,
 		ReplicaId:  i.rowId,
@@ -603,38 +642,62 @@ func TestPreAcceptedFastPath2(t *testing.T) {
 		Ballot:     i.ballot,
 	}
 
-	for count := 0; count < i.replica.fastQuorum(); count++ {
+	// the deps from replies is not the same as the unioned one. test purpose only
+	for count := 0; count < i.replica.quorum(); count++ {
 		action, msg := i.preAcceptedProcess(reply)
-		if count != i.replica.fastQuorum()-1 {
+		if count != i.replica.quorum()-1 {
 			assert.Equal(t, i.status, preAccepted)
-			assert.Equal(t, i.info.preAcceptCount, count+1)
-			assert.True(t, i.info.sameDepsAndSeq)
-			assert.True(t, i.info.depsChanged)
-			assert.True(t, i.info.seqChanged)
-			assert.Equal(t, i.seq, reply.Seq)
 			assert.Equal(t, i.deps, commonTestlibUnionedDeps())
 			assert.Equal(t, action, noAction)
 		} else {
-			p := msg.(*data.Commit)
 			assert.Equal(t, action, broadcastAction)
-			assert.Equal(t, i.status, committed)
-			assert.Equal(t, p.Seq, reply.Seq)
-			assert.Equal(t, p.Deps, commonTestlibUnionedDeps())
+			assert.Equal(t, i.status, accepted)
+			ac := msg.(*data.Accept)
+			assert.Equal(t, ac.Seq, reply.Seq)
+			assert.Equal(t, ac.Deps, commonTestlibUnionedDeps())
 		}
 	}
 }
 
-// **********************
-// **** SLOW PATH *******
-// **********************
+// - on receiving a mix of preaccept-ok/-reply messages
+func TestPreAcceptedSlowPath2(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
 
-// preaccepted instance should go fast path,
-func TestPreAcceptedSlowPath(t *testing.T) {
+	newerDeps := i.deps
+	newerDeps[i.rowId+1]++
+
+        okReply := &data.PreAcceptOk{InstanceId: i.id}
+	reply := &data.PreAcceptReply{
+		Ok:         true,
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Seq:        i.seq + 1,
+		Deps:       newerDeps,
+		Ballot:     i.ballot,
+	}
+
+	// the deps from replies is not the same as the unioned one. test purpose only
+	for count := 0; count < i.replica.quorum(); count++ {
+		if count != i.replica.quorum()-1 {
+			action, _ := i.preAcceptedProcess(reply)
+			assert.Equal(t, i.status, preAccepted)
+			assert.Equal(t, i.deps, newerDeps)
+			assert.True(t, i.info.samePreAcceptReplies)
+			assert.Equal(t, action, noAction)
+		} else {
+			action, msg := i.preAcceptedProcess(okReply)
+			assert.Equal(t, action, broadcastAction)
+			assert.Equal(t, i.status, accepted)
+			ac := msg.(*data.Accept)
+			assert.Equal(t, ac.Seq, reply.Seq)
+			assert.Equal(t, ac.Deps, newerDeps)
+		}
+	}
 }
 
 // TestPreAcceptedProcessWithHandlePreAcceptOk asserts that
 // when a pre-accepted instance receives a pre-accept-ok message, it
-// will handle the message if the instance is at its initial round.
+// will handle the message if the instance is at initial ballot.
 // Otherwise it should panic.
 func TestPreAcceptedProcessWithHandlePreAcceptOk(t *testing.T) {
 	// create a pre-accepted instance
@@ -642,9 +705,9 @@ func TestPreAcceptedProcessWithHandlePreAcceptOk(t *testing.T) {
 
 	expectedInst := commonTestlibCloneInstance(i)
 	expectedInst.status = committed
-	expectedInst.info.preAcceptCount = i.replica.fastQuorum()
+	expectedInst.info.preAcceptOkCount = i.replica.fastQuorum()
 
-	i.info.preAcceptCount = i.replica.fastQuorum() - 1
+	i.info.preAcceptOkCount = i.replica.fastQuorum() - 1
 
 	// create and send a prepare message to the instance
 	pr := &data.PreAcceptOk{}
@@ -983,10 +1046,10 @@ func TestAcceptedProcessWithHandleAcceptReply(t *testing.T) {
 	// create an accepted instance
 	inst := commonTestlibExampleAcceptedInstance()
 	// modify info to make it ready to enter committed status
-	inst.info.acceptCount = inst.replica.quorum() - 1
+	inst.info.acceptReplyCount = inst.replica.quorum() - 1
 
 	expectedInst := commonTestlibCloneInstance(inst)
-	expectedInst.info.acceptCount = inst.replica.quorum()
+	expectedInst.info.acceptReplyCount = inst.replica.quorum()
 	expectedInst.status = committed
 
 	// create an accept-reply message and send it to the instance

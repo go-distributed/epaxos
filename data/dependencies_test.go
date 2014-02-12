@@ -28,16 +28,16 @@ func TestUnion(t *testing.T) {
 	for i := range other {
 		other[i] = uint64(i)
 	}
-	changed := self.Union(other)
-	assert.False(t, changed)
+	same := self.Union(other)
+	assert.True(t, same)
 
 	other = make(Dependencies, 5)
 	for i := range other {
 		other[i] = uint64(5 - i)
 	}
-	changed = self.Union(other)
+	same = self.Union(other)
 
-	assert.True(t, changed)
+	assert.False(t, same)
 	assert.Equal(t, self, Dependencies{5, 4, 3, 3, 4})
 }
 

@@ -12,16 +12,16 @@ func (d Dependencies) Union(other Dependencies) bool {
 		panic("Union: size different!")
 	}
 
-	changed := false
+	same := true
 	for i := range d {
 		if d[i] != other[i] {
+			same = false
 			if d[i] < other[i] {
 				d[i] = other[i]
-				changed = true
 			}
 		}
 	}
-	return changed
+	return same
 }
 
 func (d Dependencies) Clone() Dependencies {
