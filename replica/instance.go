@@ -379,7 +379,7 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 // It handles most kinds of messages (in some conditions with larger ballot) and
 // ignores all replies except prepare reply.
 func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
-	defer i.checkStatus(preparing, preAccepted, accepted, committed)
+	defer i.checkStatus(preparing, preAccepted, accepted, committed, nilStatus)
 
 	if !i.isAtStatus(preparing) || i.recoveryInfo == nil {
 		panic("")
@@ -797,6 +797,7 @@ func (i *Instance) handlePrepareReply(p *data.PrepareReply) (action uint8, msg M
 	}
 
 	// We will wait until having received N/2 replies for next transition.
+
 	return noAction, nil
 }
 
@@ -888,7 +889,7 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 func (i *Instance) loadRecoveryInfo() {
 	ir := i.recoveryInfo
 	i.cmds, i.seq, i.deps = ir.cmds, ir.seq, ir.deps
-	i.ballot, i.status = ir.ballot, ir.status
+	i.ballot = ir.ballot
 }
 
 func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
