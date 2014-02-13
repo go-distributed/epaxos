@@ -1,8 +1,8 @@
 epaxos
 ======
-[![Build Status](https://drone.io/github.com/go-epaxos/epaxos/status.png)](https://drone.io/github.com/go-epaxos/epaxos/latest)
+[![Build Status](https://drone.io/github.com/go-distributed/epaxos/status.png)](https://drone.io/github.com/go-distributed/epaxos/latest)
 
-[![Coverage Status](https://coveralls.io/repos/go-epaxos/epaxos/badge.png)](https://coveralls.io/r/go-epaxos/epaxos)
+[![Coverage Status](https://coveralls.io/repos/go-distributed/epaxos/badge.png?branch=master)](https://coveralls.io/r/go-distributed/epaxos?branch=master)
 
 A Go implementation of epaxos
 
