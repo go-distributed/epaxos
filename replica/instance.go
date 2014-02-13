@@ -133,7 +133,7 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 	return i.status >= status
 }
 
-func (i *Instance) freshlyCreated() bool {
+func (i *Instance) isAtInitialRound() bool {
 	return i.ballot.Epoch() == 0
 }
 
@@ -244,7 +244,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		}
 		return i.handlePrepare(content)
 	case *data.PrepareReply:
-		if i.freshlyCreated() {
+		if i.isAtInitialRound() {
 			panic("Never send prepare before but receive prepare reply")
 		}
 		return noAction, nil
@@ -481,7 +481,7 @@ func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 
 // a propose will broadcasted to fast quorum in pre-accept message.
 func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAccept) {
-	if p.Cmds == nil || !i.freshlyCreated() {
+	if p.Cmds == nil || !i.isAtInitialRound() {
 		panic("")
 	}
 
@@ -1020,7 +1020,7 @@ func (i *Instance) enterPreparing() {
 	// differentiates two cases on entering preparing:
 	// - seen any message about this instance before (with ballot).
 	// - never seen anything concerning this instance before.
-	if i.freshlyCreated() {
+	if i.isAtInitialRound() {
 		// epoch.1.id
 		i.ballot = i.replica.makeInitialBallot()
 		i.ballot.IncNumber()
