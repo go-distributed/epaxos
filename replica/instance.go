@@ -133,7 +133,7 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 	return i.status >= status
 }
 
-func (i *Instance) freshlyCreated() bool {
+func (i *Instance) isAtInitialRound() bool {
 	return i.ballot.Epoch() == 0
 }
 
@@ -216,7 +216,7 @@ func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
 // - - after reverted back from `preparing`(sender -> receiver)
 // - - received prepare and waiting for further message. (receiver)
 func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
-	defer i.checkStatus(preAccepted, accepted, committed, preparing)
+	defer i.checkStatus(nilStatus, preAccepted, accepted, committed, preparing)
 
 	if !i.isAtStatus(nilStatus) {
 		panic("")
@@ -232,6 +232,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handlePreAccept(content)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
+			// [*] this could happens when the instance revert from preparing
 			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
@@ -243,10 +244,10 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		}
 		return i.handlePrepare(content)
 	case *data.PrepareReply:
-		if i.freshlyCreated() {
+		if i.isAtInitialRound() {
 			panic("Never send prepare before but receive prepare reply")
 		}
-		return action, nil
+		return noAction, nil
 	case *data.PreAcceptReply, *data.AcceptReply, *data.PreAcceptOk:
 		panic("")
 	default:
@@ -480,7 +481,7 @@ func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 
 // a propose will broadcasted to fast quorum in pre-accept message.
 func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAccept) {
-	if p.Cmds == nil || !i.freshlyCreated() {
+	if p.Cmds == nil || !i.isAtInitialRound() {
 		panic("")
 	}
 
@@ -1019,7 +1020,7 @@ func (i *Instance) enterPreparing() {
 	// differentiates two cases on entering preparing:
 	// - seen any message about this instance before (with ballot).
 	// - never seen anything concerning this instance before.
-	if i.freshlyCreated() {
+	if i.isAtInitialRound() {
 		// epoch.1.id
 		i.ballot = i.replica.makeInitialBallot()
 		i.ballot.IncNumber()
