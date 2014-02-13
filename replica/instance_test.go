@@ -615,6 +615,12 @@ func TestPreAcceptedProcessWithHandleAccept(t *testing.T) {
 	// test larger ballot accept
 	// the above one is test both in same ballot. here the accept ballot is larger.
 	inst = commonTestlibExamplePreAcceptedInstance()
+	expectedInst = commonTestlibCloneInstance(inst)
+	expectedInst.cmds = expectedCmds
+	expectedInst.seq = expectedSeq
+	expectedInst.deps = expectedDeps
+	expectedInst.status = accepted
+
 	inst.status = preAccepted
 	ac.Ballot = largerBallot
 	_, reply = inst.preAcceptedProcess(ac)
