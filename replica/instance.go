@@ -216,7 +216,7 @@ func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
 // - - after reverted back from `preparing`(sender -> receiver)
 // - - received prepare and waiting for further message. (receiver)
 func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
-	defer i.checkStatus(preAccepted, accepted, committed, preparing)
+	defer i.checkStatus(nilStatus, preAccepted, accepted, committed, preparing)
 
 	if !i.isAtStatus(nilStatus) {
 		panic("")
@@ -232,6 +232,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handlePreAccept(content)
 	case *data.Accept:
 		if content.Ballot.Compare(i.ballot) < 0 {
+			// [*] this could happens when the instance revert from preparing
 			return i.rejectAccept()
 		}
 		return i.handleAccept(content)
@@ -246,7 +247,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		if i.freshlyCreated() {
 			panic("Never send prepare before but receive prepare reply")
 		}
-		return action, nil
+		return noAction, nil
 	case *data.PreAcceptReply, *data.AcceptReply, *data.PreAcceptOk:
 		panic("")
 	default:
