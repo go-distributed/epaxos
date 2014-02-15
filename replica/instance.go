@@ -137,6 +137,10 @@ func (i *Instance) isAtInitialRound() bool {
 	return i.ballot.Epoch() == 0
 }
 
+func (i *Instance) Commands() data.Commands {
+	return i.cmds
+}
+
 // This is used to check when handling preaccept-reply messages,
 // can this instance could still go to fast path
 //
@@ -515,6 +519,7 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	}
 	// pre-accept-ok for possible fast quorum commit
 	return replyAction, &data.PreAcceptOk{
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 	}
 }

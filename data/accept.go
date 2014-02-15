@@ -31,3 +31,19 @@ func (a *AcceptReply) Type() uint8 {
 func (a *AcceptReply) Content() interface{} {
 	return a
 }
+
+func (p *Accept) Replica() uint8 {
+	return p.ReplicaId
+}
+
+func (p *Accept) Instance() uint64 {
+	return p.InstanceId
+}
+
+func (p *AcceptReply) Replica() uint8 {
+	return p.ReplicaId
+}
+
+func (p *AcceptReply) Instance() uint64 {
+	return p.InstanceId
+}

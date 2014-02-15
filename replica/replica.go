@@ -17,15 +17,15 @@ var _ = fmt.Printf
 // ****************************
 // *****  CONST ENUM **********
 // ****************************
-const defaultInstancesLength = 1024
+const defaultInstancesLength = 1024*1024
 const conflictNotFound = 0
+const epochStart = 1
 
 // actions
 const (
 	noAction uint8 = iota + 1
 	replyAction
 	fastQuorumAction
-	majoritySendAction
 	broadcastAction
 )
 
@@ -40,6 +40,13 @@ type Replica struct {
 	InstanceMatrix [][]*Instance
 	StateMachine   epaxos.StateMachine
 	Epoch          uint32
+	EventChan      chan *Event
+	Transporter
+}
+
+type Event struct {
+	From    uint8
+	Message Message
 }
 
 func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
@@ -52,7 +59,9 @@ func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 		MaxInstanceNum: make([]uint64, size),
 		InstanceMatrix: make([][]*Instance, size),
 		StateMachine:   sm,
-		Epoch:          1,
+		Epoch:          epochStart,
+		// TODO: decide channel buffer length
+		EventChan: make(chan *Event),
 	}
 
 	for i := uint8(0); i < size; i++ {
@@ -62,6 +71,86 @@ func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 
 	return r
 }
+
+// Start running the replica. It shouldn't stop at any time.
+func (r *Replica) Start() {
+	for {
+		// TODO: check timeout
+		// add time.After for timeout checking
+		select {
+		case event := <-r.EventChan:
+			r.dispatch(event)
+		}
+	}
+}
+func (r *Replica) GoStart() { go r.Start() }
+
+// TODO: This must be done in an synchronized/atomic way.
+func (r *Replica) Propose(cmds data.Commands) {
+	event := &Event{
+		From: r.Id,
+		Message: &data.Propose{
+			ReplicaId:  r.Id,
+			InstanceId: r.MaxInstanceNum[r.Id] + 1,
+			Cmds:       cmds,
+		},
+	}
+	r.dispatch(event)
+}
+
+// *****************************
+// ***** Message Handling ******
+// *****************************
+
+// This function is responsible for communicating with instance processing.
+func (r *Replica) dispatch(event *Event) {
+	eventMsg := event.Message
+	replicaId := eventMsg.Replica()
+	instanceId := eventMsg.Instance()
+
+	if instanceId <= conflictNotFound {
+		panic("")
+	}
+
+	if r.InstanceMatrix[replicaId][instanceId] == nil {
+		r.InstanceMatrix[replicaId][instanceId] = NewInstance(r, replicaId, instanceId)
+	}
+
+	i := r.InstanceMatrix[replicaId][instanceId]
+	var action uint8
+	var msg Message
+
+	switch i.status {
+	case nilStatus:
+		action, msg = i.nilStatusProcess(eventMsg)
+	case preAccepted:
+		action, msg = i.preAcceptedProcess(eventMsg)
+	case accepted:
+		action, msg = i.acceptedProcess(eventMsg)
+	case committed:
+		action, msg = i.committedProcess(eventMsg)
+	default:
+		panic("")
+	}
+
+	switch action {
+	case noAction:
+		return
+	case replyAction:
+		r.Transporter.Send(event.From, msg)
+	case fastQuorumAction:
+		r.Transporter.MulticastFastquorum(msg)
+	case broadcastAction:
+		r.Transporter.Broadcast(msg)
+	default:
+		panic("")
+
+	}
+}
+
+// **************************
+// Instance Related Fields
+// **************************
 
 func (r *Replica) fastQuorum() int {
 	if r.Size < 2 {

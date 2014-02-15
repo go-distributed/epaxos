@@ -12,6 +12,7 @@ type PreAccept struct {
 // we don't need ReplicaId in PreAcceptOk,
 // because only the leader will receive this message.
 type PreAcceptOk struct {
+	ReplicaId  uint8
 	InstanceId uint64
 }
 
@@ -41,4 +42,28 @@ func (p *PreAcceptReply) Type() uint8 {
 }
 func (p *PreAcceptReply) Content() interface{} {
 	return p
+}
+
+func (p *PreAccept) Replica() uint8 {
+	return p.ReplicaId
+}
+
+func (p *PreAccept) Instance() uint64 {
+	return p.InstanceId
+}
+
+func (p *PreAcceptOk) Replica() uint8 {
+	return p.ReplicaId
+}
+
+func (p *PreAcceptOk) Instance() uint64 {
+	return p.InstanceId
+}
+
+func (p *PreAcceptReply) Replica() uint8 {
+	return p.ReplicaId
+}
+
+func (p *PreAcceptReply) Instance() uint64 {
+	return p.InstanceId
 }

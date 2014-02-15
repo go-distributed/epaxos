@@ -825,7 +825,10 @@ func TestPreAcceptedFastPath(t *testing.T) {
 	// shold be initial round
 	assert.True(t, i.ballot.IsInitialBallot())
 
-	reply := &data.PreAcceptOk{InstanceId: i.id}
+	reply := &data.PreAcceptOk{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+	}
 	oldSeq := i.seq
 
 	for count := 0; count < i.replica.fastQuorum(); count++ {
@@ -923,7 +926,10 @@ func TestPreAcceptedSlowPath2(t *testing.T) {
 	newerDeps := i.deps
 	newerDeps[i.rowId+1]++
 
-	okReply := &data.PreAcceptOk{InstanceId: i.id}
+	okReply := &data.PreAcceptOk{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+	}
 	reply := &data.PreAcceptReply{
 		Ok:         true,
 		ReplicaId:  i.rowId,
@@ -1451,7 +1457,7 @@ func TestCommittedProcessWithNoAction(t *testing.T) {
 	action, m := inst.committedProcess(pa)
 
 	// expect:
-	// - action: NoAction
+	// - action: noAction
 	// - message: nil
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
