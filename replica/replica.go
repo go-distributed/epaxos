@@ -4,6 +4,9 @@ package replica
 // @decision (02/01/14):
 // - Replica Epoch starts from 1. 0 is reserved for fresly created instance.
 // - Now freshly created instance always has the minimum ballot.
+// @decision(02/15/14):
+// - An instance will always set dependency on its immediate precessor in the same
+// - instance space. This enforces sequential execution in single instance space.
 
 import (
 	"fmt"
@@ -17,7 +20,7 @@ var _ = fmt.Printf
 // ****************************
 // *****  CONST ENUM **********
 // ****************************
-const defaultInstancesLength = 1024*1024
+const defaultInstancesLength = 1024
 const conflictNotFound = 0
 const epochStart = 1
 
@@ -185,12 +188,26 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 	deps := make(data.Dependencies, r.Size)
 	seq := uint32(0)
 
-	for i := range r.InstanceMatrix {
-		instances := r.InstanceMatrix[i]
-		start := r.MaxInstanceNum[i]
+	for curr := range r.InstanceMatrix {
+		instances := r.InstanceMatrix[curr]
+		start := r.MaxInstanceNum[curr]
+
+		// set deps on its precessor
+		if curr == int(r.Id) {
+			if start != i.id-1 {
+				panic("")
+			}
+			if start != conflictNotFound {
+				deps[curr] = start
+				if instances[start].seq >= seq {
+					seq = instances[start].seq + 1
+				}
+			}
+			continue
+		}
 
 		if conflict, ok := r.scanConflicts(instances, cmds, start, conflictNotFound); ok {
-			deps[i] = conflict
+			deps[curr] = conflict
 			if instances[conflict].seq >= seq {
 				seq = instances[conflict].seq + 1
 			}
@@ -199,7 +216,9 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 	i.cmds, i.seq, i.deps = cmds, seq, deps
 	// we can only update here because
 	// now we are safe to have cmds, etc. inside instance
-	i.replica.updateMaxInstanceNum(i.rowId, i.id)
+	if !i.replica.updateMaxInstanceNum(i.rowId, i.id) {
+		panic("")
+	}
 }
 
 // This func updates the passed in dependencies from replica[from].
