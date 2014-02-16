@@ -20,7 +20,7 @@ var _ = fmt.Printf
 // ****************************
 // *****  CONST ENUM **********
 // ****************************
-const defaultInstancesLength = 1024
+const defaultInstancesLength = 1024 * 64
 const conflictNotFound = 0
 const epochStart = 1
 
@@ -40,6 +40,7 @@ type Replica struct {
 	Id             uint8
 	Size           uint8
 	MaxInstanceNum []uint64 // the highest instance number seen for each replica
+	ProposeNum     uint64
 	InstanceMatrix [][]*Instance
 	StateMachine   epaxos.StateMachine
 	Epoch          uint32
@@ -60,6 +61,7 @@ func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 		Id:             replicaId,
 		Size:           size,
 		MaxInstanceNum: make([]uint64, size),
+		ProposeNum:     1,
 		InstanceMatrix: make([][]*Instance, size),
 		StateMachine:   sm,
 		Epoch:          epochStart,
@@ -88,17 +90,18 @@ func (r *Replica) Start() {
 }
 func (r *Replica) GoStart() { go r.Start() }
 
-// TODO: This must be done in an synchronized/atomic way.
+// TODO: This must be done in a synchronized/atomic way.
 func (r *Replica) Propose(cmds data.Commands) {
 	event := &Event{
 		From: r.Id,
 		Message: &data.Propose{
 			ReplicaId:  r.Id,
-			InstanceId: r.MaxInstanceNum[r.Id] + 1,
+			InstanceId: r.ProposeNum,
 			Cmds:       cmds,
 		},
 	}
-	r.dispatch(event)
+	r.ProposeNum++
+	r.EventChan <- event
 }
 
 // *****************************

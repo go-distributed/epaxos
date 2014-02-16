@@ -41,20 +41,25 @@ func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 	return nodes
 }
 
-func Test5ReplicaLive(t *testing.T) {
+func Test3ReplicaReplication(t *testing.T) {
 	cmds := livetestlibExampleCommands()
-	nodes := livetestlibSetupCluster(5)
-	for i := 0; i < 1000; i++ {
+	nodes := livetestlibSetupCluster(3)
+
+        maxInstance := 1024*48
+
+	for i := 0; i < maxInstance; i++ {
 		nodes[0].Propose(cmds)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
-	for i := 0; i < 1000; i++ {
+	for i := 1; i <= maxInstance; i++ {
 		for _, r := range nodes {
-			assert.NotNil(t, r.InstanceMatrix[0][i+1])
-                        assert.Equal(t, r.InstanceMatrix[0][i+1].Commands(), cmds)
+			assert.NotNil(t, r.InstanceMatrix[0][i])
+                        assert.Equal(t, r.InstanceMatrix[0][i].Commands(), cmds)
 		}
 	}
 
 }
+
+

@@ -491,7 +491,6 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 
 	i.ballot = i.replica.makeInitialBallot()
 	i.enterPreAcceptedAsSender()
-
 	i.replica.initInstance(p.Cmds, i)
 
 	return fastQuorumAction, i.makePreAccept()
