@@ -1,8 +1,8 @@
 package replica
 
 type Message interface {
-	Type() uint8 // TODO: we don't need Type()
+	//Type() uint8 // TODO: we don't need Type()
 	Content() interface{}
-	// TODO: ReplicaId() uint8
-	// TODO: InstanceId() uint64
+	Replica() uint8
+	Instance() uint64
 }

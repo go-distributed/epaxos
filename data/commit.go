@@ -15,3 +15,11 @@ func (c *Commit) Type() uint8 {
 func (c *Commit) Content() interface{} {
 	return c
 }
+
+func (c *Commit) Replica() uint8 {
+	return c.ReplicaId
+}
+
+func (c *Commit) Instance() uint64 {
+	return c.InstanceId
+}

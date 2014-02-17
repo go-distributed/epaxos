@@ -43,14 +43,18 @@ We are documenting directories description here.
 
   Message, commands and other related data module.
 
-* **test/**
-
-  Testing infrastructure.
-
 * **doc/**
 
   General concepts explanation and blue print documentation.
   For detailed documentation, please refer to individual moduel and files.
+
+* **test/**
+
+  This directory contains example external modules (state machines, etc.) for testing purpose.
+
+* **livetest/**
+
+  Live testing modules.
 
 Contact
 ------

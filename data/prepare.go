@@ -35,3 +35,19 @@ func (p *PrepareReply) Type() uint8 {
 func (p *PrepareReply) Content() interface{} {
 	return p
 }
+
+func (p *Prepare) Replica() uint8 {
+	return p.ReplicaId
+}
+
+func (p *Prepare) Instance() uint64 {
+	return p.InstanceId
+}
+
+func (p *PrepareReply) Replica() uint8 {
+	return p.ReplicaId
+}
+
+func (p *PrepareReply) Instance() uint64 {
+	return p.InstanceId
+}
