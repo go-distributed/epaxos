@@ -12,7 +12,12 @@ import (
 var _ = fmt.Printf
 
 func TestNewReplica(t *testing.T) {
-	r := New(3, 5, new(test.DummySM))
+	param := &Param{
+		ReplicaId:    3,
+		Size:         5,
+		StateMachine: new(test.DummySM),
+	}
+	r := New(param)
 
 	assert.True(t, r.Id == 3)
 	assert.True(t, r.Size == 5)
@@ -25,11 +30,17 @@ func TestNewReplica(t *testing.T) {
 		assert.True(t, len(r.InstanceMatrix[i]) == defaultInstancesLength)
 	}
 
-	assert.Panics(t, func() { New(3, 4, new(test.DummySM)) })
+	param.Size = 4
+	assert.Panics(t, func() { New(param) })
 }
 
 func TestMakeInitialBallot(t *testing.T) {
-	r := New(3, 5, new(test.DummySM))
+	param := &Param{
+		ReplicaId:    3,
+		Size:         5,
+		StateMachine: new(test.DummySM),
+	}
+	r := New(param)
 	r.Epoch = 3
 	b := r.makeInitialBallot()
 	assert.Equal(t, b, data.NewBallot(3, 0, 3))
@@ -37,7 +48,12 @@ func TestMakeInitialBallot(t *testing.T) {
 
 // return a replica with id=5, size=5, and maxinstancenum of [1,2,3,4,5]
 func depsTestSetupReplica() (r *Replica, i *Instance) {
-	r = New(4, 5, new(test.DummySM))
+	param := &Param{
+		ReplicaId:    4,
+		Size:         5,
+		StateMachine: new(test.DummySM),
+	}
+	r = New(param)
 	for i := 0; i < 5; i++ {
 		r.MaxInstanceNum[i] = uint64(conflictNotFound + 1 + uint64(i))
 		instance := NewInstance(r, r.Id, conflictNotFound+1+uint64(i))

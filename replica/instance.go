@@ -141,6 +141,14 @@ func (i *Instance) Commands() data.Commands {
 	return i.cmds
 }
 
+func (i *Instance) Dependencies() data.Dependencies {
+	return i.deps
+}
+
+func (i *Instance) Seq() uint32{
+	return i.seq
+}
+
 // This is used to check when handling preaccept-reply messages,
 // can this instance could still go to fast path
 //
