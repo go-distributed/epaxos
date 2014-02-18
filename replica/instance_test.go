@@ -36,7 +36,12 @@ func commonTestlibUnionedDeps() data.Dependencies {
 }
 
 func commonTestlibExampleInstance() *Instance {
-	r := New(0, 5, new(test.DummySM))
+	param := &Param{
+		ReplicaId:    0,
+		Size:         5,
+		StateMachine: new(test.DummySM),
+	}
+	r := New(param)
 	i := NewInstance(r, 0, conflictNotFound+1)
 	return i
 }
@@ -131,7 +136,12 @@ func commonTestlibCloneInstance(inst *Instance) *Instance {
 func TestNewInstance(t *testing.T) {
 	expectedReplicaId := uint8(0)
 	expectedInstanceId := uint64(1)
-	r := New(expectedReplicaId, 5, new(test.DummySM))
+	param := &Param{
+		ReplicaId:    expectedReplicaId,
+		Size:         5,
+		StateMachine: new(test.DummySM),
+	}
+	r := New(param)
 	i := NewInstance(r, expectedReplicaId, expectedInstanceId)
 	assert.Equal(t, i.replica.Id, expectedReplicaId)
 	assert.Equal(t, i.rowId, expectedReplicaId)

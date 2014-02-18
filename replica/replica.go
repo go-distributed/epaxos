@@ -7,6 +7,9 @@ package replica
 // @decision(02/15/14):
 // - An instance will always set dependency on its immediate precessor in the same
 // - instance space. This enforces sequential execution in single instance space.
+// @decision(02/17/14):
+// - Add checkpoint cycle. Any instance conflicts with a checkpoint and vice versa.
+// - This is used to decrease the size of conflict scanning space.
 
 import (
 	"fmt"
@@ -37,15 +40,22 @@ const (
 // ****************************
 
 type Replica struct {
-	Id             uint8
-	Size           uint8
-	MaxInstanceNum []uint64 // the highest instance number seen for each replica
-	ProposeNum     uint64
-	InstanceMatrix [][]*Instance
-	StateMachine   epaxos.StateMachine
-	Epoch          uint32
-	EventChan      chan *Event
+	Id              uint8
+	Size            uint8
+	MaxInstanceNum  []uint64 // the highest instance number seen for each replica
+	ProposeNum      uint64
+	CheckpointCycle uint64
+	InstanceMatrix  [][]*Instance
+	StateMachine    epaxos.StateMachine
+	Epoch           uint32
+	EventChan       chan *Event
 	Transporter
+}
+
+type Param struct {
+	ReplicaId    uint8
+	Size         uint8
+	StateMachine epaxos.StateMachine
 }
 
 type Event struct {
@@ -53,18 +63,25 @@ type Event struct {
 	Message Message
 }
 
-func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
+//func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
+func New(param *Param) (r *Replica) {
+	replicaId := param.ReplicaId
+	size := param.Size
+	sm := param.StateMachine
+	cycle := uint64(1024)
+
 	if size%2 == 0 {
 		panic("size should be an odd number")
 	}
 	r = &Replica{
-		Id:             replicaId,
-		Size:           size,
-		MaxInstanceNum: make([]uint64, size),
-		ProposeNum:     1,
-		InstanceMatrix: make([][]*Instance, size),
-		StateMachine:   sm,
-		Epoch:          epochStart,
+		Id:              replicaId,
+		Size:            size,
+		MaxInstanceNum:  make([]uint64, size),
+		ProposeNum:      1,
+		CheckpointCycle: cycle,
+		InstanceMatrix:  make([][]*Instance, size),
+		StateMachine:    sm,
+		Epoch:           epochStart,
 		// TODO: decide channel buffer length
 		EventChan: make(chan *Event),
 	}
@@ -101,6 +118,9 @@ func (r *Replica) Propose(cmds data.Commands) {
 		},
 	}
 	r.ProposeNum++
+	if r.IsCheckpoint(r.ProposeNum) {
+		r.ProposeNum++
+	}
 	r.EventChan <- event
 }
 
@@ -186,8 +206,12 @@ func (r *Replica) makeInitialDeps() data.Dependencies {
 // It returns (seq, cmds)
 // seq = 1 + max{i.seq, where haveconflicts(i.cmds, cmds)} || 0
 // cmds = most recent interference instance for each instance space
-// TODO: This should be atomic operation in perspective of individual instance.
+// TODO: this operation should synchronized/atomic
 func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
+	if i.rowId != r.Id {
+		panic("")
+	}
+
 	deps := make(data.Dependencies, r.Size)
 	seq := uint32(0)
 
@@ -195,25 +219,20 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 		instances := r.InstanceMatrix[curr]
 		start := r.MaxInstanceNum[curr]
 
-		// set deps on its precessor
-		if curr == int(r.Id) {
-			if start != i.id-1 {
-				panic("")
-			}
-			if start != conflictNotFound {
-				deps[curr] = start
-				if instances[start].seq >= seq {
-					seq = instances[start].seq + 1
-				}
+		if curr == int(i.rowId) {
+			// set deps on its immediate precessor
+			conflict := uint64(i.id - 1)
+			deps[curr] = conflict
+			if !r.IsCheckpoint(conflict) && instances[conflict].seq >= seq {
+				seq = instances[conflict].seq + 1
 			}
 			continue
 		}
 
-		if conflict, ok := r.scanConflicts(instances, cmds, start, conflictNotFound); ok {
-			deps[curr] = conflict
-			if instances[conflict].seq >= seq {
-				seq = instances[conflict].seq + 1
-			}
+		conflict, _ := r.scanConflicts(instances, cmds, start, conflictNotFound)
+		deps[curr] = conflict
+		if !r.IsCheckpoint(conflict) && instances[conflict].seq >= seq {
+			seq = instances[conflict].seq + 1
 		}
 	}
 	i.cmds, i.seq, i.deps = cmds, seq, deps
@@ -226,11 +245,12 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 
 // This func updates the passed in dependencies from replica[from].
 // return seq, updated dependencies and whether the dependencies has changed.
+// TODO: this operation should synchronized/atomic
 func (r *Replica) updateInstance(cmds data.Commands, seq uint32, deps data.Dependencies, from uint8, i *Instance) bool {
 	changed := false
 
 	for curr := range r.InstanceMatrix {
-		// short cut here, the sender knows the latest dependencies for itself
+		// the sender knows the latest dependencies for its instance space
 		if curr == int(from) {
 			continue
 		}
@@ -241,7 +261,7 @@ func (r *Replica) updateInstance(cmds data.Commands, seq uint32, deps data.Depen
 		if conflict, ok := r.scanConflicts(instances, cmds, start, end); ok {
 			changed = true
 			deps[curr] = conflict
-			if instances[conflict].seq >= seq {
+			if !r.IsCheckpoint(conflict) && instances[conflict].seq >= seq {
 				seq = instances[conflict].seq + 1
 			}
 		}
@@ -254,10 +274,17 @@ func (r *Replica) updateInstance(cmds data.Commands, seq uint32, deps data.Depen
 	return changed
 }
 
+func (r *Replica) IsCheckpoint(n uint64) bool {
+	return n%r.CheckpointCycle == 0
+}
+
 // scanConflicts scans the instances from start to end (high to low).
 // return the highest instance that has conflicts with passed in cmds.
 func (r *Replica) scanConflicts(instances []*Instance, cmds data.Commands, start uint64, end uint64) (uint64, bool) {
 	for i := start; i > end; i-- {
+		if r.IsCheckpoint(i) {
+			return i, true
+		}
 		if instances[i] == nil {
 			continue
 		}
