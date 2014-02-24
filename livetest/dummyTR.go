@@ -30,7 +30,6 @@ func (tr *DummyTransporter) MulticastFastquorum(msg replica.Message) {
 		tr.Send(uint8(i), msg)
 		sendoutCount++
 	}
-
 }
 
 func (tr *DummyTransporter) Broadcast(msg replica.Message) {
