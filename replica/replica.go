@@ -23,9 +23,11 @@ var _ = fmt.Printf
 // ****************************
 // *****  CONST ENUM **********
 // ****************************
-const defaultInstancesLength = 1024 * 64
-const conflictNotFound = 0
-const epochStart = 1
+const (
+	defaultInstancesLength = 1024 * 64
+	conflictNotFound       = 0
+	epochStart             = 1
+)
 
 // actions
 const (
