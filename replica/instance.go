@@ -59,6 +59,10 @@ type Instance struct {
 	rowId    uint8
 	id       uint64
 	executed bool
+
+	// tarjan SCC
+	sccIndex int
+	sccLowlink int
 }
 
 // bookkeeping struct for recording counts of different messages and some flags

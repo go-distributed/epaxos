@@ -14,7 +14,7 @@ type DummyTransporter struct {
 func (tr *DummyTransporter) Send(to uint8, msg replica.Message) {
 	go func() {
 		r := tr.Nodes[to]
-		r.EventChan <- &replica.Event{tr.Self, msg}
+		r.MessageEventChan <- &replica.MessageEvent{tr.Self, msg}
 	}()
 }
 
@@ -30,7 +30,6 @@ func (tr *DummyTransporter) MulticastFastquorum(msg replica.Message) {
 		tr.Send(uint8(i), msg)
 		sendoutCount++
 	}
-
 }
 
 func (tr *DummyTransporter) Broadcast(msg replica.Message) {

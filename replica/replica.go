@@ -12,7 +12,9 @@ package replica
 // - This is used to decrease the size of conflict scanning space.
 
 import (
+	"container/list"
 	"fmt"
+	"time"
 
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/data"
@@ -23,9 +25,12 @@ var _ = fmt.Printf
 // ****************************
 // *****  CONST ENUM **********
 // ****************************
-const defaultInstancesLength = 1024 * 64
-const conflictNotFound = 0
-const epochStart = 1
+const (
+	defaultInstancesLength = 1024 * 64
+	conflictNotFound       = 0
+	epochStart             = 1
+	executeInterval        = 5 * time.Millisecond
+)
 
 // actions
 const (
@@ -40,25 +45,31 @@ const (
 // ****************************
 
 type Replica struct {
-	Id              uint8
-	Size            uint8
-	MaxInstanceNum  []uint64 // the highest instance number seen for each replica
-	ProposeNum      uint64
-	CheckpointCycle uint64
-	InstanceMatrix  [][]*Instance
-	StateMachine    epaxos.StateMachine
-	Epoch           uint32
-	EventChan       chan *Event
+	Id               uint8
+	Size             uint8
+	MaxInstanceNum   []uint64 // the highest instance number seen for each replica
+	ProposeNum       uint64
+	CheckpointCycle  uint64
+	ExecutedUpTo     []uint64
+	InstanceMatrix   [][]*Instance
+	StateMachine     epaxos.StateMachine
+	Epoch            uint32
+	MessageEventChan chan *MessageEvent
 	Transporter
+
+	// tarjan SCC
+	sccStack *list.List
+	sccIndex int
 }
 
 type Param struct {
-	ReplicaId    uint8
-	Size         uint8
-	StateMachine epaxos.StateMachine
+	ReplicaId       uint8
+	Size            uint8
+	StateMachine    epaxos.StateMachine
+	CheckpointCycle uint64
 }
 
-type Event struct {
+type MessageEvent struct {
 	From    uint8
 	Message Message
 }
@@ -71,19 +82,20 @@ func New(param *Param) (r *Replica) {
 	cycle := uint64(1024)
 
 	if size%2 == 0 {
+		// TODO: epaxos replica error
 		panic("size should be an odd number")
 	}
 	r = &Replica{
-		Id:              replicaId,
-		Size:            size,
-		MaxInstanceNum:  make([]uint64, size),
-		ProposeNum:      1,
-		CheckpointCycle: cycle,
-		InstanceMatrix:  make([][]*Instance, size),
-		StateMachine:    sm,
-		Epoch:           epochStart,
-		// TODO: decide channel buffer length
-		EventChan: make(chan *Event),
+		Id:               replicaId,
+		Size:             size,
+		MaxInstanceNum:   make([]uint64, size),
+		ProposeNum:       1,
+		CheckpointCycle:  cycle,
+		ExecutedUpTo:     make([]uint64, size),
+		InstanceMatrix:   make([][]*Instance, size),
+		StateMachine:     sm,
+		Epoch:            epochStart,
+		MessageEventChan: make(chan *MessageEvent),
 	}
 
 	for i := uint8(0); i < size; i++ {
@@ -96,20 +108,37 @@ func New(param *Param) (r *Replica) {
 
 // Start running the replica. It shouldn't stop at any time.
 func (r *Replica) Start() {
-	for {
-		// TODO: check timeout
-		// add time.After for timeout checking
-		select {
-		case event := <-r.EventChan:
-			r.dispatch(event)
-		}
-	}
+	go r.eventLoop()
+	go r.executeLoop()
 }
-func (r *Replica) GoStart() { go r.Start() }
+
+// handling events
+func (r *Replica) eventLoop() {
+	go func() {
+		for {
+			// TODO: check timeout
+			// add time.After for timeout checking
+			select {
+			case mevent := <-r.MessageEventChan:
+				r.dispatch(mevent)
+			}
+		}
+	}()
+}
+
+func (r *Replica) executeLoop() {
+	go func() {
+		for {
+			time.Sleep(executeInterval)
+			// execution of committed instances
+			r.findAndExecute()
+		}
+	}()
+}
 
 // TODO: This must be done in a synchronized/atomic way.
 func (r *Replica) Propose(cmds data.Commands) {
-	event := &Event{
+	mevent := &MessageEvent{
 		From: r.Id,
 		Message: &data.Propose{
 			ReplicaId:  r.Id,
@@ -121,7 +150,7 @@ func (r *Replica) Propose(cmds data.Commands) {
 	if r.IsCheckpoint(r.ProposeNum) {
 		r.ProposeNum++
 	}
-	r.EventChan <- event
+	r.MessageEventChan <- mevent
 }
 
 // *****************************
@@ -129,8 +158,8 @@ func (r *Replica) Propose(cmds data.Commands) {
 // *****************************
 
 // This function is responsible for communicating with instance processing.
-func (r *Replica) dispatch(event *Event) {
-	eventMsg := event.Message
+func (r *Replica) dispatch(mevent *MessageEvent) {
+	eventMsg := mevent.Message
 	replicaId := eventMsg.Replica()
 	instanceId := eventMsg.Instance()
 
@@ -163,7 +192,7 @@ func (r *Replica) dispatch(event *Event) {
 	case noAction:
 		return
 	case replyAction:
-		r.Transporter.Send(event.From, msg)
+		r.Transporter.Send(mevent.From, msg)
 	case fastQuorumAction:
 		r.Transporter.MulticastFastquorum(msg)
 	case broadcastAction:
@@ -303,4 +332,106 @@ func (r *Replica) updateMaxInstanceNum(rowId uint8, instanceId uint64) bool {
 		return true
 	}
 	return false
+}
+
+// ******************************
+// ********  EXECUTION **********
+// ******************************
+
+func (r *Replica) findAndExecute() {
+	for i := 0; i < int(r.Size); i++ {
+		// search this instance space
+		for {
+			up := r.ExecutedUpTo[i] + 1
+
+			if r.IsCheckpoint(up) {
+				r.ExecutedUpTo[i]++
+				continue
+			}
+
+			instance := r.InstanceMatrix[i][up]
+			if instance == nil || !instance.isAtStatus(committed) {
+				break
+			}
+			if instance.executed {
+				r.ExecutedUpTo[i]++
+				continue
+			}
+
+			if ok := r.execute(instance); !ok {
+				break
+			}
+		}
+	}
+}
+
+// NOTE: atomic
+func (r *Replica) execute(i *Instance) bool {
+	r.sccStack = list.New()
+	r.sccIndex = 1
+	if ok := r.resolveConflicts(i); !ok {
+		return false
+	}
+	return true
+}
+
+func (r *Replica) resolveConflicts(node *Instance) bool {
+	node.sccIndex = r.sccIndex
+	node.sccLowlink = r.sccIndex
+	r.sccIndex++
+
+	r.sccStack.PushBack(node)
+	for iter := 0; iter < int(r.Size); iter++ {
+		dep := node.deps[iter]
+		neighbor := r.InstanceMatrix[iter][dep]
+		if !neighbor.executed {
+			return false
+		}
+
+		if neighbor.sccIndex == 0 {
+			if ok := r.resolveConflicts(neighbor); !ok {
+				return false
+			}
+			if neighbor.sccLowlink < node.sccLowlink {
+				node.sccLowlink = neighbor.sccLowlink
+			}
+		} else if r.inSccStack(neighbor) {
+			if neighbor.sccLowlink < node.sccLowlink {
+				node.sccLowlink = neighbor.sccLowlink
+			}
+		}
+	}
+
+	if node.sccLowlink == node.sccIndex {
+		var neighbor *Instance
+
+		for neighbor == nil ||
+			node.rowId != neighbor.rowId ||
+			node.id != neighbor.id {
+			neighbor = r.popSccStack()
+			// NOTE: execute
+			// we need to ensure safety later.
+			r.StateMachine.Execute(neighbor.cmds)
+		}
+	}
+
+	return true
+}
+
+func (r *Replica) inSccStack(other *Instance) bool {
+	iter := r.sccStack.Front()
+	for iter != nil {
+		self := iter.Value.(*Instance)
+		if self.rowId == other.rowId && self.id == other.id {
+			return true
+		}
+		iter = iter.Next()
+	}
+	return false
+}
+
+func (r *Replica) popSccStack() *Instance {
+	res := r.sccStack.Back().Value.(*Instance)
+	r.sccStack.Remove(r.sccStack.Back())
+	return res
 }
