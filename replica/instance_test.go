@@ -2216,6 +2216,109 @@ func TestRejections(t *testing.T) {
 // ******* HANDLE MESSAGE *******
 // ******************************
 
+// TestHandlePropose tests the correctness of handlePropose
+func TestHandlePropose(t *testing.T) {
+	i := commonTestlibExampleNilStatusInstance()
+	cmds := commonTestlibExampleCommands()
+	p := &data.Propose{
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Cmds:       nil,
+	}
+	// should panic is cmds == nil
+	assert.Panics(t, func() { i.handlePropose(p) })
+
+	// should panic if the instance not at nilStatus
+	i = commonTestlibExamplePreAcceptedInstance()
+	p.Cmds = cmds
+	assert.Panics(t, func() { i.handlePropose(p) })
+
+	// should panic if the instance is not at first round
+	i = commonTestlibExampleNilStatusInstance()
+	i.ballot = i.replica.makeInitialBallot().IncNumClone()
+	assert.Panics(t, func() { i.handlePropose(p) })
+
+	i = commonTestlibExampleNilStatusInstance()
+	act, msg := i.handlePropose(p)
+	assert.Equal(t, act, fastQuorumAction)
+	assert.Equal(t, msg, &data.PreAccept{
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Cmds:       i.cmds,
+		Seq:        i.seq,
+		Deps:       i.deps,
+		Ballot:     i.ballot,
+	})
+}
+
+// TestHandlePreAccept tests the correctness of handlePreAccept
+func TestHandlePreAccept(t *testing.T) {
+	i := commonTestlibExampleNilStatusInstance()
+
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+	deps := commonTestlibExampleDeps()
+
+	i.ballot = largerBallot
+	p := &data.PreAccept{
+		Cmds:       commonTestlibExampleCommands(),
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Deps:       deps,
+		Ballot:     smallerBallot,
+	}
+
+	// should panic if the ballot of the pre-accept is smaller
+	assert.Panics(t, func() { i.handlePreAccept(p) })
+
+	i.ballot = smallerBallot
+	p.Ballot = smallerBallot
+
+	// should reply PreAcceptOk
+	act, msg := i.handlePreAccept(p)
+	assert.Equal(t, act, replyAction)
+	assert.Equal(t, msg, &data.PreAcceptOk{
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+	})
+
+	deps = data.Dependencies{1, 2, 3, 4, 5}
+	p.Deps = deps.Clone()
+
+	// make instance[1][9] conflict with the pre-accept
+	i.replica.MaxInstanceNum[i.replica.Id+1] = 10
+	i.replica.InstanceMatrix[i.replica.Id+1][9] = commonTestlibCloneInstance(i)
+	expectedDeps := data.Dependencies{1, 9, 3, 4, 5}
+	expectedSeq := uint32(1)
+
+	act, msg = i.handlePreAccept(p)
+
+	// should have expectedSeq and Deps
+	assert.Equal(t, act, replyAction)
+	assert.Equal(t, msg, &data.PreAcceptReply{
+		Ok:         true,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Seq:        expectedSeq,
+		Deps:       expectedDeps,
+		Ballot:     smallerBallot,
+	})
+
+	// make the pre-accept not in the initial round
+	p.Ballot = largerBallot
+	p.Deps = deps.Clone()
+	act, msg = i.handlePreAccept(p)
+	assert.Equal(t, act, replyAction)
+	assert.Equal(t, msg, &data.PreAcceptReply{
+		Ok:         true,
+		ReplicaId:  i.replica.Id,
+		InstanceId: i.id,
+		Seq:        expectedSeq,
+		Deps:       expectedDeps,
+		Ballot:     largerBallot,
+	})
+}
+
 // It's testing `handleprepare` will return (replyaction, correct prepare-reply)
 func TestHandlePrepare(t *testing.T) {
 	i := commonTestlibExamplePreAcceptedInstance()
