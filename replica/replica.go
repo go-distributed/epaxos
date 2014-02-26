@@ -58,8 +58,9 @@ type Replica struct {
 	Transporter
 
 	// tarjan SCC
-	sccStack *list.List
-	sccIndex int
+	sccStack  *list.List
+	sccResult *list.List
+	sccIndex  int
 }
 
 type Param struct {
@@ -368,24 +369,43 @@ func (r *Replica) findAndExecute() {
 // NOTE: atomic
 func (r *Replica) execute(i *Instance) bool {
 	r.sccStack = list.New()
+	r.sccResult = list.New()
 	r.sccIndex = 1
 	if ok := r.resolveConflicts(i); !ok {
 		return false
 	}
+	// execute elements in the result list
+	// the list will maintain the order of nodes that:
+	// - The lower level strongly connected component locates at smaller index.
+	// - In the same component, nodes at higher instance space index locates
+	// - at smaller index.
+
+	r.executeList()
 	return true
 }
 
+// this should be a transaction.
+func (r *Replica) executeList() {
+	panic("")
+}
+
+// Assumption:
+// - If a node is executed, then all the strongly connected components it belongs to or
+// - lower than its has been executed. This is useful to reduce search space.
 func (r *Replica) resolveConflicts(node *Instance) bool {
 	node.sccIndex = r.sccIndex
 	node.sccLowlink = r.sccIndex
 	r.sccIndex++
 
 	r.sccStack.PushBack(node)
-	for iter := 0; iter < int(r.Size); iter++ {
-		dep := node.deps[iter]
-		neighbor := r.InstanceMatrix[iter][dep]
-		if !neighbor.executed {
+	for iSpace := 0; iSpace < int(r.Size); iSpace++ {
+		dep := node.deps[iSpace]
+		neighbor := r.InstanceMatrix[iSpace][dep]
+		if neighbor.status != committed {
 			return false
+		}
+		if neighbor.executed {
+			continue
 		}
 
 		if neighbor.sccIndex == 0 {
@@ -409,9 +429,7 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 			node.rowId != neighbor.rowId ||
 			node.id != neighbor.id {
 			neighbor = r.popSccStack()
-			// NOTE: execute
-			// we need to ensure safety later.
-			r.StateMachine.Execute(neighbor.cmds)
+			r.sccResult.PushBack(neighbor)
 		}
 	}
 
