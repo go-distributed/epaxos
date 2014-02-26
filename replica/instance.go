@@ -145,7 +145,7 @@ func (i *Instance) Dependencies() data.Dependencies {
 	return i.deps
 }
 
-func (i *Instance) Seq() uint32{
+func (i *Instance) Seq() uint32 {
 	return i.seq
 }
 
@@ -493,7 +493,7 @@ func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 
 // a propose will broadcasted to fast quorum in pre-accept message.
 func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAccept) {
-	if p.Cmds == nil || !i.isAtInitialRound() {
+	if p.Cmds == nil || !i.isAtInitialRound() || !i.isAtStatus(nilStatus) {
 		panic("")
 	}
 
@@ -520,6 +520,7 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 	if changed {
 		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
 	}
+
 	// not initial leader
 	if !p.Ballot.IsInitialBallot() {
 		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
