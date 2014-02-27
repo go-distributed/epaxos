@@ -663,14 +663,13 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 // if receiving majority replies with ok == true,
 //    then broadcast Commit
 // otherwise: do nothing.
-func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *data.Commit) {
+func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg Message) {
 	if a.Ballot.Compare(i.ballot) < 0 {
 		panic("")
 	}
 
 	// negative reply
 	if a.Ballot.Compare(i.ballot) > 0 {
-
 		// [*] there may be stale but large ballots,
 		// if we receive such ballots, that means there may be another newer proposer,
 		// so we'd better step down by increasing our own ballot so we can ignore
