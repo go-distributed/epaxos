@@ -2331,6 +2331,107 @@ func TestHandlePreAccept(t *testing.T) {
 	})
 }
 
+// TestHandlePreAcceptOk tests the correctness of handlePreAcceptOk
+func TestHandlePreAcceptOk(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
+	p := &data.PreAcceptOk{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+	}
+
+	initialBallot := i.replica.makeInitialBallot()
+	largeBallot := initialBallot.IncNumClone()
+
+	// should panic if i is not at initial round
+	i.ballot = largeBallot
+	assert.Panics(t, func() { i.handlePreAcceptOk(p) })
+
+	i.ballot = initialBallot
+
+	// should receive noAction and nil message since
+	// we haven't got enough replies
+	act, msg := i.handlePreAcceptOk(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.info.preAcceptOkCount, 1)
+
+	// should receive broadcastAction and a commit message
+	i.info.preAcceptOkCount = i.replica.fastQuorum() - 1
+	act, msg = i.handlePreAcceptOk(p)
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       i.cmds,
+		Seq:        i.seq,
+		Deps:       i.deps,
+	})
+	assert.Equal(t, i.status, committed)
+
+	// should panic since we should have changed to other state
+	assert.Panics(t, func() { i.handlePreAcceptOk(p) })
+}
+
+// This func tests the correctness of handlePreAcceptReply
+func TestHandlePreAcceptReply(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
+	p := &data.PreAcceptReply{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+	}
+	smallBallot := i.replica.makeInitialBallot()
+	largeBallot := smallBallot.IncNumClone()
+
+	i.ballot = largeBallot
+	p.Ballot = smallBallot
+
+	// should panic
+	assert.Panics(t, func() { i.handlePreAcceptReply(p) })
+
+	// should panic too
+	i.ballot = smallBallot
+	p.Ballot = largeBallot
+	p.Ok = true
+	assert.Panics(t, func() { i.handlePreAcceptReply(p) })
+
+	// i should update its ballot and return noAction and nil message
+	p.Ok = false
+	act, msg := i.handlePreAcceptReply(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.ballot, largeBallot)
+
+	i.ballot = smallBallot
+	p.Ballot = smallBallot
+	p.Deps = commonTestlibExampleDeps()
+	p.Ok = true
+
+	// receive the first reply, nothing should happens
+	act, msg = i.handlePreAcceptReply(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.info.samePreAcceptReplies, true)
+	assert.Equal(t, i.info.preAcceptReplyCount, 1)
+
+	// receive the second not same reply,
+	// i should send out accept message (since total replica size is 5)
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.ballot = smallBallot
+	p.Ballot = smallBallot
+	i.info.preAcceptReplyCount = 1
+	act, msg = i.handlePreAcceptReply(p)
+
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     smallBallot,
+		Seq:        i.seq,
+		Deps:       i.deps,
+		Cmds:       i.cmds,
+	})
+}
+
 // TestHandleAccept tests the correctness of handlePreAcceptOk
 func TestHandleAccept(t *testing.T) {
 	i := commonTestlibExamplePreAcceptedInstance()
