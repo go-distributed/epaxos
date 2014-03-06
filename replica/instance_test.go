@@ -2558,18 +2558,23 @@ func TestHandleAcceptReply(t *testing.T) {
 // It's testing `handleprepare` will return (replyaction, correct prepare-reply)
 func TestHandlePrepare(t *testing.T) {
 	i := commonTestlibExamplePreAcceptedInstance()
+
 	smallerBallot := i.replica.makeInitialBallot()
 	largerBallot := smallerBallot.IncNumClone()
 
+	i.rowId = i.replica.Id
 	i.ballot = smallerBallot
 	i.deps = data.Dependencies{3, 4, 5, 6, 7}
 
 	prepare := &data.Prepare{
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
-		Ballot:     largerBallot,
 	}
 
+	prepare.Ballot = smallerBallot
+	assert.Panics(t, func() { i.handlePrepare(prepare) })
+
+	prepare.Ballot = largerBallot
 	action, reply := i.handlePrepare(prepare)
 
 	assert.Equal(t, action, replyAction)
@@ -2585,7 +2590,7 @@ func TestHandlePrepare(t *testing.T) {
 		Ballot:         largerBallot,
 		OriginalBallot: smallerBallot,
 		ReplicaId:      i.rowId,
-		IsFromLeader:   false,
+		IsFromLeader:   true,
 		InstanceId:     i.id,
 	})
 
@@ -2630,6 +2635,9 @@ func TestHandleCommit(t *testing.T) {
 	i = commonTestlibExampleNilStatusInstance()
 	i.handleCommit(cm)
 	assert.Equal(t, i.status, committed)
+
+	i = commonTestlibExampleCommittedInstance()
+	assert.Panics(t, func() { i.handleCommit(cm) })
 }
 
 // TestCheckStatus tests the behaviour of checkStatus,
