@@ -722,9 +722,10 @@ func (i *Instance) revertAndHandlePrepare(p *data.Prepare) (action uint8, msg *d
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
 	oldBallot := i.ballot.Clone()
 
-	// We optimize the case of committed instance in reply with ok=true message
-	// and no need to update self ballot.
-	// So only non-committed instance needs to update self ballot.
+	// if the instance is alreay a commited one,
+	// then it just replies with ok == true,
+	// and does not update its ballot, so only
+	// non-committed instance will need to update self ballot.
 	if !i.isAtStatus(committed) {
 		if p.Ballot.Compare(i.ballot) <= 0 { // cannot be equal or smaller
 			panic(fmt.Sprintln("prepare ballot: ", p.Ballot, i.ballot))
