@@ -2640,6 +2640,80 @@ func TestHandleCommit(t *testing.T) {
 	assert.Panics(t, func() { i.handleCommit(cm) })
 }
 
+// This func tests the correctness of handlePrepareReply
+func TestHandlePrepareReply(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+	cmds := commonTestlibExampleCommands()
+	deps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         committed,
+		Seq:            42,
+		Cmds:           cmds,
+		Deps:           deps,
+		Ballot:         largerBallot,
+		OriginalBallot: smallerBallot,
+		IsFromLeader:   false,
+	}
+
+	// should panic if i is not at prepare status
+	i.status = committed
+	assert.Panics(t, func() { i.handlePrepareReply(p) })
+
+	// should panic if p has a smaller ballot, which means the reply is stale
+	i.status = preparing
+	i.ballot = largerBallot
+	p.Ballot = smallerBallot
+	assert.Panics(t, func() { i.handlePrepareReply(p) })
+
+	// should panic if p has a larger ballot, but its Ok == true
+	i.ballot = smallerBallot
+	p.Ballot = largerBallot
+	p.Ok = true
+	assert.Panics(t, func() { i.handlePrepareReply(p) })
+
+	// should return noAction and nil,
+	// and i's ballot should be updated
+	p.Ok = false
+	act, msg := i.handlePrepareReply(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.ballot, largerBallot)
+
+	// should panic if i have already received enough replies
+	i.ballot = smallerBallot
+	p.Ballot = smallerBallot
+	p.Ok = true
+	i.recoveryInfo.replyCount = i.replica.quorum()
+	assert.Panics(t, func() { i.handlePrepareReply(p) })
+
+	// should return noAction, nil, since we haven't received enough replies
+	i = commonTestlibExamplePreparingInstance()
+	i.ballot = smallerBallot
+	i.recoveryInfo.replyCount = i.replica.quorum() - 2
+	p.Status = accepted
+	act, msg = i.handlePrepareReply(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+
+	// should return broadcastAction, commit
+	p.Status = committed
+	act, msg = i.handlePrepareReply(p)
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        42,
+		Deps:       deps,
+	})
+}
+
 // TestCheckStatus tests the behaviour of checkStatus,
 // - If instance is not at any status listed in checking function, it should panic.
 // - If instance is at status listed, it should not panic.
