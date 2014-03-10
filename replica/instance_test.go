@@ -2714,6 +2714,254 @@ func TestHandlePrepareReply(t *testing.T) {
 	})
 }
 
+// *******************************************
+// ***** Tests for prepare-reply helpers *****
+// *******************************************
+
+func TestUpdateReocveryInstance(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+	cmds := commonTestlibExampleCommands()
+	deps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         committed,
+		Seq:            42,
+		Cmds:           cmds,
+		Deps:           deps,
+		Ballot:         smallerBallot,
+		OriginalBallot: largerBallot,
+		IsFromLeader:   false,
+	}
+
+	// should panic if p has invalid status
+	p.Status = preparing
+	assert.Panics(t, func() { i.updateRecoveryInstance(p) })
+
+	// go through all the path
+	p.Status = committed
+	i.updateRecoveryInstance(p)
+	p.Status = accepted
+	i.updateRecoveryInstance(p)
+	p.Status = preAccepted
+	i.updateRecoveryInstance(p)
+	p.Status = nilStatus
+	i.updateRecoveryInstance(p)
+}
+
+func TestHandleCommittedPrepareReply(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	iSeq := i.recoveryInfo.seq
+	iDeps := i.recoveryInfo.deps.Clone()
+	iCmds := i.recoveryInfo.cmds.Clone()
+	iBallot := i.recoveryInfo.ballot.Clone()
+
+	pCmds := commonTestlibExampleCommands()
+	pDeps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         committed,
+		Seq:            42,
+		Cmds:           pCmds,
+		Deps:           pDeps,
+		Ballot:         smallerBallot,
+		OriginalBallot: largerBallot,
+		IsFromLeader:   false,
+	}
+
+	// nothing should be changed if i has already received a committed reply
+	i.recoveryInfo.status = committed
+	i.handleCommittedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, iBallot)
+	assert.Equal(t, i.recoveryInfo.status, committed)
+
+	// should update the recoveryInfo if i has not received a committed reply yet
+	i.recoveryInfo.status = nilStatus
+
+	i.handleCommittedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, committed)
+}
+
+func TestHandleAcceptedPrepareReply(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	iSeq := i.recoveryInfo.seq
+	iDeps := i.recoveryInfo.deps.Clone()
+	iCmds := i.recoveryInfo.cmds.Clone()
+	iBallot := i.recoveryInfo.ballot.Clone()
+
+	pCmds := commonTestlibExampleCommands()
+	pDeps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         accepted,
+		Seq:            42,
+		Cmds:           pCmds,
+		Deps:           pDeps,
+		Ballot:         largerBallot,
+		OriginalBallot: smallerBallot,
+		IsFromLeader:   false,
+	}
+	i.recoveryInfo.status = committed
+
+	// should not change the recoveryInfo if
+	// i has received a later status than accepted from the replies
+	i.handleAcceptedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, iBallot)
+	assert.Equal(t, i.recoveryInfo.status, committed)
+
+	// should update the recoveryInfo if
+	// i has not received a later status than accepted from the replies yet
+	i.recoveryInfo.status = preAccepted
+	i.handleAcceptedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, smallerBallot)
+	assert.Equal(t, i.recoveryInfo.status, accepted)
+
+	// should not change the recoveryInfo if
+	// i has received an accepted-reply with larger ballot
+	i = commonTestlibExamplePreparingInstance()
+	i.recoveryInfo.status = accepted
+	i.recoveryInfo.ballot = largerBallot
+	i.handleAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, accepted)
+
+	// should update the recoveryInfo if
+	// p has a larger ballot than all the replies
+	// that i has ever received
+	i.recoveryInfo.ballot = smallerBallot
+	p.OriginalBallot = largerBallot
+	i.handleAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, accepted)
+}
+
+func TestHandlePreAcceptedPrepareReply(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	iSeq := i.recoveryInfo.seq
+	iDeps := i.recoveryInfo.deps.Clone()
+	iCmds := i.recoveryInfo.cmds.Clone()
+	iBallot := i.recoveryInfo.ballot.Clone()
+
+	pCmds := commonTestlibExampleCommands()
+	pDeps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         preAccepted,
+		Seq:            42,
+		Cmds:           pCmds,
+		Deps:           pDeps,
+		Ballot:         largerBallot,
+		OriginalBallot: smallerBallot,
+		IsFromLeader:   false,
+	}
+
+	// should not change the recoveryInfo if
+	// i has received a later status than pre-accepted from the replies
+	i.recoveryInfo.status = accepted
+	i.handlePreAcceptedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, iBallot)
+	assert.Equal(t, i.recoveryInfo.status, accepted)
+
+	// should update the recoveryInfo if
+	// i has not received a later status than pre-accepted from the replies yet
+	i.recoveryInfo.status = nilStatus
+	i.handlePreAcceptedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, smallerBallot)
+	assert.Equal(t, i.recoveryInfo.status, preAccepted)
+	// identicalCount should be 1 since the reply if from a member of fast quorom
+	assert.Equal(t, i.recoveryInfo.identicalCount, 1)
+
+	// should not change the recoveryInfo if
+	// i has received an pre-accepted-reply with larger ballot
+	i = commonTestlibExamplePreparingInstance()
+	i.recoveryInfo.status = preAccepted
+	i.recoveryInfo.ballot = largerBallot
+	i.handlePreAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, preAccepted)
+
+	// should update the recoveryInfo if
+	// p has a larger ballot than all the replies
+	// that i has ever received
+	i.recoveryInfo.ballot = smallerBallot
+	p.OriginalBallot = largerBallot
+	i.handlePreAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, preAccepted)
+	// identicalCount should be zero
+	assert.Equal(t, i.recoveryInfo.identicalCount, 0)
+
+	// should increase the identicalCount when receiving
+	// an identical reply
+	i = commonTestlibExamplePreparingInstance()
+	i.recoveryInfo.status = nilStatus
+	i.recoveryInfo.ballot = smallerBallot
+	p.OriginalBallot = smallerBallot
+	i.handlePreAcceptedPrepareReply(p)
+	i.handlePreAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, smallerBallot)
+	assert.Equal(t, i.recoveryInfo.status, preAccepted)
+	// identicalCount should be 2
+	assert.Equal(t, i.recoveryInfo.identicalCount, 2)
+}
+
 // TestCheckStatus tests the behaviour of checkStatus,
 // - If instance is not at any status listed in checking function, it should panic.
 // - If instance is at status listed, it should not panic.
