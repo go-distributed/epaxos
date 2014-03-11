@@ -880,7 +880,6 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 		// Obviously, p.Ballot is not initial ballot,
 		// in this case, we won't send accept next.
 		ir.updateByPrepareReply(p)
-		ir.identicalCount = 0
 		return
 	}
 
