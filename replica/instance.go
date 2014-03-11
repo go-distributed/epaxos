@@ -851,11 +851,8 @@ func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 
 	// for same status accepted reply, we will keep the one of largest ballot.
-	if ir.ballot.Compare(p.OriginalBallot) > 0 {
+	if ir.ballot.Compare(p.OriginalBallot) >= 0 {
 		return
-	}
-	if ir.ballot.Compare(p.OriginalBallot) == 0 {
-		panic("")
 	}
 
 	ir.updateByPrepareReply(p)
