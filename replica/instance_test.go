@@ -2138,7 +2138,7 @@ func TestPreAcceptedPreparingHandlePrepareReply(t *testing.T) {
 	p.Cmds, p.Deps = ir.cmds, ir.deps
 	p.OriginalBallot = ir.ballot.IncNumClone() // non initial
 	i.handlePrepareReply(p)
-	assert.Equal(t, ir.identicalCount, 0)
+	assert.Equal(t, ir.identicalCount, 1)
 
 	i = commonTestlibExamplePreAcceptedInstance()
 	i.rowId = i.replica.Id
