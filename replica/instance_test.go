@@ -2962,6 +2962,135 @@ func TestHandlePreAcceptedPrepareReply(t *testing.T) {
 	assert.Equal(t, i.recoveryInfo.identicalCount, 2)
 }
 
+func TestMakeRecoveryDecision(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	cmds := commonTestlibExampleCommands()
+	deps := commonTestlibExampleDeps()
+
+	// should get broadcastAction and commit message
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = committed
+	i.recoveryInfo.cmds = cmds
+	i.recoveryInfo.seq = 42
+	i.recoveryInfo.deps = deps
+	i.recoveryInfo.ballot = largerBallot
+
+	act, msg := i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Deps:       deps,
+		Seq:        42,
+	})
+
+	// should get broadcastAction and accept message
+	i = commonTestlibExamplePreparingInstance()
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = accepted
+	i.recoveryInfo.cmds = cmds
+	i.recoveryInfo.seq = 42
+	i.recoveryInfo.deps = deps
+	i.recoveryInfo.ballot = largerBallot
+
+	act, msg = i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        42,
+		Deps:       deps,
+		Ballot:     largerBallot,
+	})
+
+	// should get broadcastAction and accept message
+	i = commonTestlibExamplePreparingInstance()
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = preAccepted
+	i.recoveryInfo.cmds = cmds
+	i.recoveryInfo.seq = 42
+	i.recoveryInfo.deps = deps
+	i.recoveryInfo.identicalCount = i.replica.quorum()
+	i.recoveryInfo.ballot = largerBallot
+
+	act, msg = i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        42,
+		Deps:       deps,
+		Ballot:     largerBallot,
+	})
+
+	// should get broadcastAction and pre-accept message
+	i = commonTestlibExamplePreparingInstance()
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = preAccepted
+	i.recoveryInfo.cmds = cmds
+	i.recoveryInfo.seq = 42
+	i.recoveryInfo.deps = deps
+	i.recoveryInfo.identicalCount = i.replica.quorum() - 1
+	i.recoveryInfo.ballot = largerBallot
+
+	act, msg = i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.PreAccept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        42,
+		Deps:       deps,
+		Ballot:     largerBallot,
+	})
+
+	// should get broadcastAction and accept message with commands = no-op
+	i = commonTestlibExamplePreparingInstance()
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = nilStatus
+	i.recoveryInfo.cmds = nil
+	i.recoveryInfo.seq = 0
+	i.recoveryInfo.deps = data.Dependencies{0, 0, 0, 0, 0}
+	i.recoveryInfo.identicalCount = i.replica.quorum() - 1
+
+	act, msg = i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       nil,
+		Seq:        0,
+		Deps:       data.Dependencies{0, 0, 0, 0, 0},
+		Ballot:     i.ballot,
+	})
+
+	i.recoveryInfo.status = nilStatus - 1
+	assert.Panics(t, func() { i.makeRecoveryDecision() })
+}
+
+// Tests for getters
+func TestInstanceGetters(t *testing.T) {
+	cmds := commonTestlibExampleCommands()
+	deps := commonTestlibExampleDeps()
+
+	i := &Instance{
+		cmds: cmds,
+		seq:  42,
+		deps: deps,
+	}
+
+	assert.Equal(t, i.Commands(), cmds)
+	assert.Equal(t, i.Seq(), uint32(42))
+	assert.Equal(t, i.Dependencies(), deps)
+}
+
 // TestCheckStatus tests the behaviour of checkStatus,
 // - If instance is not at any status listed in checking function, it should panic.
 // - If instance is at status listed, it should not panic.
