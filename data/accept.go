@@ -4,7 +4,6 @@ type Accept struct {
 	ReplicaId  uint8
 	InstanceId uint64
 	Cmds       Commands
-	Seq        uint32
 	Deps       Dependencies
 	Ballot     *Ballot
 }

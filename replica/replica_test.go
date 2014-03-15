@@ -65,14 +65,13 @@ func depsTestSetupReplica() (r *Replica, i *Instance) {
 }
 
 // If commands are conflicted with instance on each space [1, 2, 3, 4, 5].
-// It should return seq=1, deps=[1,2,3,4,5]
+// It should return deps=[1,2,3,4,5]
 func TestInitInstance(t *testing.T) {
 	r, i := depsTestSetupReplica()
 	Cmds := commonTestlibExampleCommands()
 	r.initInstance(Cmds, i)
 
 	assert.Equal(t, i.cmds, Cmds)
-	assert.Equal(t, i.seq, uint32(1))
 	assert.Equal(t, i.deps, data.Dependencies{1, 2, 3, 4, 5})
 }
 
@@ -84,17 +83,15 @@ func TestUpdateInstance(t *testing.T) {
 
 	deps := data.Dependencies{1, 2, 3, 4, 5}
 
-	changed := r.updateInstance(cmds, 0, deps, r.Id, i)
-	// won't search at all. so no change, and seq isn't incremented.
+	changed := r.updateInstance(cmds, deps, r.Id, i)
+	// won't search at all. so no changes.
 	assert.False(t, changed)
-	assert.Equal(t, i.seq, uint32(0))
 	assert.Equal(t, i.deps, deps)
 
 	emptyDeps := data.Dependencies{2, 0, 0, 0, 0}
 	expectedDeps := data.Dependencies{2, 2, 3, 4, 5} // it's from r0
 
-	changed = r.updateInstance(cmds, 0, emptyDeps, 0, i)
+	changed = r.updateInstance(cmds, emptyDeps, 0, i)
 	assert.True(t, changed)
-	assert.Equal(t, i.seq, uint32(1))
 	assert.Equal(t, i.deps, expectedDeps)
 }
