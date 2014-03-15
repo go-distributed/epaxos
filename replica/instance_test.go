@@ -42,8 +42,7 @@ func commonTestlibExampleInstance() *Instance {
 		StateMachine: new(test.DummySM),
 	}
 	r := New(param)
-	i := NewInstance(r, 0, conflictNotFound+1)
-	i.rowId = i.replica.Id + 1 // make rowId different with i.replica.Id
+	i := NewInstance(r, r.Id+1, conflictNotFound+1) // make rowId different with i.replica.Id
 	return i
 }
 

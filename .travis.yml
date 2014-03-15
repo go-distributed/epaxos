@@ -8,5 +8,3 @@ script:
  - go get code.google.com/p/go.tools/cmd/cover
  - cd replica
  - go test -v -cover
- - cd ../data
- - go test -v -cover
