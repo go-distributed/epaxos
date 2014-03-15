@@ -4,7 +4,6 @@ type PreAccept struct {
 	ReplicaId  uint8
 	InstanceId uint64
 	Cmds       Commands
-	Seq        uint32
 	Deps       Dependencies
 	Ballot     *Ballot
 }
@@ -20,7 +19,6 @@ type PreAcceptReply struct {
 	Ok         bool
 	ReplicaId  uint8
 	InstanceId uint64
-	Seq        uint32
 	Deps       Dependencies
 	Ballot     *Ballot
 }

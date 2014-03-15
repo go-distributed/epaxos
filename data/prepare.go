@@ -11,7 +11,6 @@ type PrepareReply struct {
 	ReplicaId  uint8
 	InstanceId uint64
 	Status     uint8
-	Seq        uint32
 	Cmds       Commands
 	Deps       Dependencies
 	Ballot     *Ballot
