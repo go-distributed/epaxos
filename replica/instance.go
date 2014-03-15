@@ -46,7 +46,6 @@ const (
 
 type Instance struct {
 	cmds   data.Commands
-	seq    uint32
 	deps   data.Dependencies
 	status uint8
 	ballot *data.Ballot
@@ -80,7 +79,6 @@ type RecoveryInfo struct {
 	ballot     *data.Ballot // for book keeping
 
 	cmds         data.Commands
-	seq          uint32
 	deps         data.Dependencies
 	status       uint8
 	formerStatus uint8
@@ -145,10 +143,6 @@ func (i *Instance) Dependencies() data.Dependencies {
 	return i.deps
 }
 
-func (i *Instance) Seq() uint32 {
-	return i.seq
-}
-
 // This is used to check when handling preaccept-reply messages,
 // can this instance could still go to fast path
 //
@@ -183,7 +177,6 @@ func (i *Instance) initRecoveryInfo() {
 
 	ir.replyCount = 0
 	ir.cmds = i.cmds.Clone()
-	ir.seq = i.seq
 	ir.deps = i.deps.Clone()
 	ir.status = i.status
 	ir.formerStatus = i.status
@@ -211,7 +204,7 @@ func (r *RecoveryInfo) statusIsAfter(status uint8) bool {
 }
 
 func (r *RecoveryInfo) updateByPrepareReply(p *data.PrepareReply) {
-	r.cmds, r.seq, r.deps = p.Cmds, p.Seq, p.Deps
+	r.cmds, r.deps = p.Cmds, p.Deps
 	r.ballot, r.status = p.OriginalBallot, p.Status
 }
 
@@ -461,7 +454,7 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 // - Ballot: self (ballot)
 // - Ids
 func (i *Instance) rejectPreAccept() (action uint8, reply *data.PreAcceptReply) {
-	return replyAction, i.makePreAcceptReply(false, 0, nil)
+	return replyAction, i.makePreAcceptReply(false, nil)
 }
 
 // rejectAccept rejects the Accept request with a AcceptReply:
@@ -505,7 +498,7 @@ func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAc
 }
 
 // When handling pre-accept, instance will set its ballot to newer one, and
-// update seq, deps if any change's found.
+// update deps if any change's found.
 // Reply: pre-accept-OK if no change in deps; otherwise a normal pre-accept-reply.
 // The pre-accept-OK contains just one field, which is a big optimization for serilization
 func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message) {
@@ -515,15 +508,15 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 
 	i.enterPreAcceptedAsReceiver()
 	i.ballot = p.Ballot
-	changed := i.replica.updateInstance(p.Cmds, p.Seq, p.Deps, i.rowId, i)
+	changed := i.replica.updateInstance(p.Cmds, p.Deps, i.rowId, i)
 
 	if changed {
-		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
+		return replyAction, i.makePreAcceptReply(true, i.deps)
 	}
 
 	// not initial leader
 	if !p.Ballot.IsInitialBallot() {
-		return replyAction, i.makePreAcceptReply(true, i.seq, i.deps)
+		return replyAction, i.makePreAcceptReply(true, i.deps)
 	}
 	// pre-accept-ok for possible fast quorum commit
 	return replyAction, &data.PreAcceptOk{
@@ -534,7 +527,7 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 
 // common routine for judging next step for handle preaccept-ok and -reply
 // The requirement for fast path is:
-// - all seq, deps in replies are the same.
+// - all deps in replies are the same.
 // - initial ballot (first round from propose)
 func (i *Instance) commonPreAcceptedNextStep() (action uint8, msg Message) {
 	replyCount := i.info.preAcceptReplyCount
@@ -553,7 +546,7 @@ func (i *Instance) commonPreAcceptedNextStep() (action uint8, msg Message) {
 
 	// slow path, we received quorum of
 	// - replies and they don't satisfy fast path.
-	// - a mix of preacept-ok/-reply implies different seq and deps.
+	// - a mix of preacept-ok/-reply implies different and deps.
 	if okCount+replyCount >= i.replica.quorum() && !i.ableToFastPath() {
 		// TODO: persistent
 		i.enterAcceptedAsSender()
@@ -592,9 +585,9 @@ func (i *Instance) handlePreAcceptOk(p *data.PreAcceptOk) (action uint8, msg Mes
 // - update ballot
 // - instance becomes a receiver from a sender
 // receiving corresponding pre-accept reply (ok == true)
-// - union seq, deps, and update counts
+// - union deps, and update counts
 // Broadcast cases:
-// - receiving == fast quorum replies with same deps and seq,
+// - receiving == fast quorum replies with same deps
 //    and the instance itself is initial leader,
 //    then broadcast Commit (fast path)
 // - receiving >= N/2 replies (not including the sender itself),
@@ -615,15 +608,6 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 
 	i.info.preAcceptReplyCount++
 
-	// seq  = max(seq from all replies)
-	if p.Seq != i.seq {
-		if p.Seq > i.seq {
-			i.seq = p.Seq
-		}
-		if i.info.preAcceptReplyCount > 1 {
-			i.info.samePreAcceptReplies = false
-		}
-	}
 	// deps = union(deps from all replies)
 	if same := i.deps.Union(p.Deps); !same {
 		// We take difference of deps only for replies from other replica.
@@ -637,7 +621,7 @@ func (i *Instance) handlePreAcceptReply(p *data.PreAcceptReply) (action uint8, m
 
 // handleAccept handles Accept messages (receiver)
 // Update:
-// - cmds, seq, ballot
+// - cmds, ballot
 // action: reply an AcceptReply message, with:
 // - Ok = true
 // - everything else = instance's fields
@@ -650,7 +634,7 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 		panic("")
 	}
 
-	i.cmds, i.seq, i.deps, i.ballot = a.Cmds, a.Seq, a.Deps, a.Ballot
+	i.cmds, i.deps, i.ballot = a.Cmds, a.Deps, a.Ballot
 	i.enterAcceptedAsReceiver()
 
 	return replyAction, i.makeAcceptReply(true)
@@ -704,7 +688,7 @@ func (i *Instance) handleCommit(c *data.Commit) (action uint8, msg Message) {
 		panic("")
 	}
 
-	i.cmds, i.seq, i.deps = c.Cmds, c.Seq, c.Deps
+	i.cmds, i.deps = c.Cmds, c.Deps
 	i.enterCommitted()
 
 	// TODO: Do we need to clear unnecessary objects to save more memory?
@@ -744,7 +728,6 @@ func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.Prepa
 		InstanceId:     i.id,
 		Status:         i.status,
 		Cmds:           i.cmds.Clone(),
-		Seq:            i.seq,
 		Deps:           i.deps.Clone(),
 		Ballot:         p.Ballot.Clone(),
 		OriginalBallot: oldBallot,
@@ -886,18 +869,18 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 	// original leader could go on fast path if
 	// * initial ballot
 	// * not from leader
-	// * identical deps and seq
+	// * identical deps
 	if p.OriginalBallot.IsInitialBallot() && !p.IsFromLeader &&
-		ir.deps.SameAs(p.Deps) && ir.seq == p.Seq {
+		ir.deps.SameAs(p.Deps) {
 		ir.identicalCount++
 	}
 }
 
-// This will load the cmds, seq, deps, ballot, status
+// This will load the cmds, deps, ballot, status
 // from recovery info to the instance fields.
 func (i *Instance) loadRecoveryInfo() {
 	ir := i.recoveryInfo
-	i.cmds, i.seq, i.deps = ir.cmds, ir.seq, ir.deps
+	i.cmds, i.deps = ir.cmds, ir.deps
 	i.ballot = ir.ballot
 }
 
@@ -939,12 +922,11 @@ func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
 // ******* Make Message *******
 // ****************************
 
-func (i *Instance) makePreAcceptReply(ok bool, seq uint32, deps data.Dependencies) *data.PreAcceptReply {
+func (i *Instance) makePreAcceptReply(ok bool, deps data.Dependencies) *data.PreAcceptReply {
 	return &data.PreAcceptReply{
 		Ok:         ok,
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
-		Seq:        seq,
 		Deps:       deps,
 		Ballot:     i.ballot.Clone(),
 	}
@@ -955,7 +937,6 @@ func (i *Instance) makePreAccept() *data.PreAccept {
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       i.cmds.Clone(),
-		Seq:        i.seq,
 		Deps:       i.deps.Clone(),
 		Ballot:     i.ballot.Clone(),
 	}
@@ -966,7 +947,6 @@ func (i *Instance) makeAccept() *data.Accept {
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       i.cmds.Clone(),
-		Seq:        i.seq,
 		Deps:       i.deps.Clone(),
 		Ballot:     i.ballot.Clone(),
 	}
@@ -986,7 +966,6 @@ func (i *Instance) makeCommit() *data.Commit {
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       i.cmds, // [*] no need to clone
-		Seq:        i.seq,
 		Deps:       i.deps, // [*] no need to clone either
 	}
 }
