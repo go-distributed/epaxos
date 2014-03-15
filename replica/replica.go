@@ -199,23 +199,13 @@ func (r *Replica) makeInitialDeps() data.Dependencies {
 	return make(data.Dependencies, r.Size)
 }
 
-// ***********************
-// ***** Seq, Deps *******
-// ***********************
-
-// This func finds the most recent interference instance from each instance space
-// of this replica.
-// It returns (seq, cmds)
-// seq = 1 + max{i.seq, where haveconflicts(i.cmds, cmds)} || 0
-// cmds = most recent interference instance for each instance space
-// TODO: this operation should synchronized/atomic
+// Thins func initiate a new instance, construct its commands and dependencies
 func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 	if i.rowId != r.Id {
 		panic("")
 	}
 
 	deps := make(data.Dependencies, r.Size)
-	seq := uint32(0)
 
 	for curr := range r.InstanceMatrix {
 		instances := r.InstanceMatrix[curr]
@@ -225,19 +215,13 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 			// set deps on its immediate precessor
 			conflict := uint64(i.id - 1)
 			deps[curr] = conflict
-			if !r.IsCheckpoint(conflict) && instances[conflict].seq >= seq {
-				seq = instances[conflict].seq + 1
-			}
 			continue
 		}
 
 		conflict, _ := r.scanConflicts(instances, cmds, start, conflictNotFound)
 		deps[curr] = conflict
-		if !r.IsCheckpoint(conflict) && instances[conflict].seq >= seq {
-			seq = instances[conflict].seq + 1
-		}
 	}
-	i.cmds, i.seq, i.deps = cmds, seq, deps
+	i.cmds, i.deps = cmds, deps
 	// we can only update here because
 	// now we are safe to have cmds, etc. inside instance
 	if !i.replica.updateMaxInstanceNum(i.rowId, i.id) {
@@ -246,9 +230,9 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 }
 
 // This func updates the passed in dependencies from replica[from].
-// return seq, updated dependencies and whether the dependencies has changed.
+// return updated dependencies and whether the dependencies has changed.
 // TODO: this operation should synchronized/atomic
-func (r *Replica) updateInstance(cmds data.Commands, seq uint32, deps data.Dependencies, from uint8, i *Instance) bool {
+func (r *Replica) updateInstance(cmds data.Commands, deps data.Dependencies, from uint8, i *Instance) bool {
 	changed := false
 
 	for curr := range r.InstanceMatrix {
@@ -263,13 +247,10 @@ func (r *Replica) updateInstance(cmds data.Commands, seq uint32, deps data.Depen
 		if conflict, ok := r.scanConflicts(instances, cmds, start, end); ok {
 			changed = true
 			deps[curr] = conflict
-			if !r.IsCheckpoint(conflict) && instances[conflict].seq >= seq {
-				seq = instances[conflict].seq + 1
-			}
 		}
 	}
 
-	i.cmds, i.seq, i.deps = cmds, seq, deps
+	i.cmds, i.deps = cmds, deps
 	// we can only update here because
 	// now we are safe to have cmds, etc. inside instance
 	i.replica.updateMaxInstanceNum(i.rowId, i.id)
