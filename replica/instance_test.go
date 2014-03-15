@@ -42,7 +42,7 @@ func commonTestlibExampleInstance() *Instance {
 		StateMachine: new(test.DummySM),
 	}
 	r := New(param)
-	i := NewInstance(r, 0, conflictNotFound+1)
+	i := NewInstance(r, r.Id+1, conflictNotFound+1) // make rowId different with i.replica.Id
 	return i
 }
 
@@ -128,6 +128,7 @@ func commonTestlibCloneInstance(inst *Instance) *Instance {
 		info:         copyInstanceInfo,
 		recoveryInfo: copyReceveryInfo,
 		replica:      inst.replica,
+		rowId:        inst.rowId,
 		id:           inst.id,
 		executed:     inst.executed,
 	}
@@ -173,6 +174,8 @@ func TestNilStatusProcessWithHandlePropose(t *testing.T) {
 	assert.Panics(t, func() { preAcceptedInstance.nilStatusProcess(p) })
 
 	i := commonTestlibExampleNilStatusInstance()
+	i.rowId = i.replica.Id // to avoid panic
+
 	// test panics empty propose
 	assert.Panics(t, func() { i.nilStatusProcess(&data.Propose{}) })
 
@@ -186,7 +189,7 @@ func TestNilStatusProcessWithHandlePropose(t *testing.T) {
 	assert.Equal(t, action, fastQuorumAction)
 
 	assert.Equal(t, pa, &data.PreAccept{
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       commonTestlibExampleCommands(),
 		Seq:        0,
@@ -426,7 +429,7 @@ func TestNilStatusProcessWithHandlePrepare(t *testing.T) {
 		Deps:           expectedDeps,
 		Ballot:         largerBallot,
 		OriginalBallot: smallerBallot,
-		IsFromLeader:   true,
+		IsFromLeader:   false,
 	})
 }
 
@@ -489,7 +492,7 @@ func TestPreAcceptedProcessWithRejectPreAccept(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, reply, &data.PreAcceptReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     largerBallot,
 	})
@@ -532,7 +535,7 @@ func TestPreAcceptedProcessWithHandlePreAccept(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, reply, &data.PreAcceptReply{
 		Ok:         true,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Seq:        expectedSeq,
 		Deps:       expectedDeps,
@@ -568,7 +571,7 @@ func TestPreAcceptedProcessWithRejectAccept(t *testing.T) {
 	assert.Equal(t, reply, &data.AcceptReply{
 		Ok:         false,
 		Ballot:     largerBallot,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 	})
 	assert.Equal(t, inst, expectedInst)
@@ -616,7 +619,7 @@ func TestPreAcceptedProcessWithHandleAccept(t *testing.T) {
 	assert.Equal(t, reply, &data.AcceptReply{
 		Ok:         true,
 		Ballot:     smallerBallot,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 	})
 	expectedInst.ballot = smallerBallot
@@ -701,7 +704,7 @@ func TestPreAcceptedProcessWithRejectPrepare(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.PrepareReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     largerBallot,
 	})
@@ -741,7 +744,7 @@ func TestPreAcceptedProcessWithHandlePrepare(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.PrepareReply{
 		Ok:             true,
-		IsFromLeader:   true,
+		IsFromLeader:   false,
 		ReplicaId:      inst.rowId,
 		InstanceId:     inst.id,
 		Status:         preAccepted,
@@ -817,7 +820,7 @@ func TestPreAcceptedProcessWithHandlePreAcceptReply(t *testing.T) {
 		Cmds:       inst.cmds,
 		Seq:        expectedSeq,
 		Deps:       expectedDeps,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     inst.ballot,
 	})
@@ -1104,7 +1107,7 @@ func TestAcceptedProcessWithRejectPreAccept(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.PreAcceptReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     inst.ballot,
 	})
@@ -1135,7 +1138,7 @@ func TestAcceptedProcessWithRejectAccept(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.AcceptReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     inst.ballot,
 	})
@@ -1186,7 +1189,7 @@ func TestAcceptedProcessWithHandleAccept(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.AcceptReply{
 		Ok:         true,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     inst.ballot,
 	})
@@ -1215,7 +1218,7 @@ func TestAcceptedProcessWithHandleCommit(t *testing.T) {
 		Cmds:       cmds,
 		Seq:        seq,
 		Deps:       deps,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 	}
 	action, m := inst.acceptedProcess(cm)
@@ -1256,7 +1259,7 @@ func TestAcceptedProcessWithRejectPrepare(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, msg, &data.PrepareReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     largeBallot,
 	})
@@ -1291,7 +1294,7 @@ func TestAcceptedProcessWithHandlePrepare(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, msg, &data.PrepareReply{
 		Ok:             true,
-		IsFromLeader:   true,
+		IsFromLeader:   false,
 		ReplicaId:      inst.rowId,
 		InstanceId:     inst.id,
 		Status:         accepted,
@@ -1363,7 +1366,7 @@ func TestAcceptedProcessWithHandleAcceptReply(t *testing.T) {
 		Cmds:       inst.cmds,
 		Seq:        inst.seq,
 		Deps:       inst.deps,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 	})
 	assert.Equal(t, inst, expectedInst)
@@ -1491,7 +1494,7 @@ func TestCommittedProcessWithRejcetAccept(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.AcceptReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     inst.ballot.Clone(),
 	})
@@ -1504,6 +1507,7 @@ func TestCommittedProcessWithRejcetAccept(t *testing.T) {
 func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 	// create a committed instance
 	inst := commonTestlibExampleCommittedInstance()
+
 	expectedInst := commonTestlibCloneInstance(inst)
 
 	// create small and large ballots
@@ -1514,7 +1518,7 @@ func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 	expectedReply := &data.PrepareReply{
 		Ok:           true,
 		ReplicaId:    inst.rowId,
-		IsFromLeader: true,
+		IsFromLeader: false,
 		InstanceId:   inst.id,
 		Status:       committed,
 		Cmds:         inst.cmds,
@@ -1569,7 +1573,7 @@ func TestCommittedProcessWithRejectPreAccept(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, &data.PreAcceptReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     inst.ballot,
 	})
@@ -1822,7 +1826,7 @@ func TestPreparingProcessWithHandlePrepare(t *testing.T) {
 	inst.ballot = smallerBallot
 
 	p := &data.Prepare{
-		ReplicaId: inst.replica.Id,
+		ReplicaId: inst.rowId,
 		Ballot:    largerBallot,
 	}
 	action, m := inst.preparingProcess(p)
@@ -1843,7 +1847,7 @@ func TestPreparingProcessWithHandlePrepare(t *testing.T) {
 		Cmds:           inst.cmds,
 		Seq:            inst.seq,
 		Deps:           inst.deps,
-		IsFromLeader:   true,
+		IsFromLeader:   false,
 	})
 }
 
@@ -2118,6 +2122,7 @@ func TestPreAcceptedPreparingHandlePrepareReply(t *testing.T) {
 	// It should not change its identicalcount
 
 	i = commonTestlibExamplePreAcceptedInstance()
+	i.rowId = i.replica.Id
 	i.enterPreparing()
 	ir = i.recoveryInfo
 	p.Cmds, p.OriginalBallot = ir.cmds, ir.ballot
@@ -2132,9 +2137,10 @@ func TestPreAcceptedPreparingHandlePrepareReply(t *testing.T) {
 	p.Cmds, p.Deps = ir.cmds, ir.deps
 	p.OriginalBallot = ir.ballot.IncNumClone() // non initial
 	i.handlePrepareReply(p)
-	assert.Equal(t, ir.identicalCount, 0)
+	assert.Equal(t, ir.identicalCount, 1)
 
 	i = commonTestlibExamplePreAcceptedInstance()
+	i.rowId = i.replica.Id
 	i.enterPreparing()
 	ir = i.recoveryInfo
 	p.Cmds, p.Deps, p.OriginalBallot = ir.cmds, ir.deps, ir.ballot
@@ -2144,6 +2150,7 @@ func TestPreAcceptedPreparingHandlePrepareReply(t *testing.T) {
 
 	// receiving N/2 identical initial, broadcast accepts
 	i = commonTestlibExamplePreAcceptedInstance()
+	i.rowId = i.replica.Id
 	i.enterPreparing()
 	ir = i.recoveryInfo
 	p.Cmds, p.Deps, p.OriginalBallot = ir.cmds, ir.deps, ir.ballot
@@ -2185,7 +2192,7 @@ func TestRejections(t *testing.T) {
 
 	assert.Equal(t, par, &data.PreAcceptReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     expectedBallot,
 	})
@@ -2196,7 +2203,7 @@ func TestRejections(t *testing.T) {
 
 	assert.Equal(t, ar, &data.AcceptReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     expectedBallot,
 	})
@@ -2206,7 +2213,7 @@ func TestRejections(t *testing.T) {
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, ppr, &data.PrepareReply{
 		Ok:         false,
-		ReplicaId:  inst.replica.Id,
+		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 		Ballot:     expectedBallot,
 	})
@@ -2219,9 +2226,11 @@ func TestRejections(t *testing.T) {
 // TestHandlePropose tests the correctness of handlePropose
 func TestHandlePropose(t *testing.T) {
 	i := commonTestlibExampleNilStatusInstance()
+	i.replica.Id = i.rowId
+
 	cmds := commonTestlibExampleCommands()
 	p := &data.Propose{
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       nil,
 	}
@@ -2239,10 +2248,12 @@ func TestHandlePropose(t *testing.T) {
 	assert.Panics(t, func() { i.handlePropose(p) })
 
 	i = commonTestlibExampleNilStatusInstance()
+	i.replica.Id = i.rowId
+
 	act, msg := i.handlePropose(p)
 	assert.Equal(t, act, fastQuorumAction)
 	assert.Equal(t, msg, &data.PreAccept{
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       i.cmds,
 		Seq:        i.seq,
@@ -2262,7 +2273,7 @@ func TestHandlePreAccept(t *testing.T) {
 	i.ballot = largerBallot
 	p := &data.PreAccept{
 		Cmds:       commonTestlibExampleCommands(),
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Deps:       deps,
 		Ballot:     smallerBallot,
@@ -2278,7 +2289,7 @@ func TestHandlePreAccept(t *testing.T) {
 	act, msg := i.handlePreAccept(p)
 	assert.Equal(t, act, replyAction)
 	assert.Equal(t, msg, &data.PreAcceptOk{
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 	})
 
@@ -2286,9 +2297,9 @@ func TestHandlePreAccept(t *testing.T) {
 	p.Deps = deps.Clone()
 
 	// make instance[1][9] conflict with the pre-accept
-	i.replica.MaxInstanceNum[i.replica.Id+1] = 10
-	i.replica.InstanceMatrix[i.replica.Id+1][9] = commonTestlibCloneInstance(i)
-	expectedDeps := data.Dependencies{1, 9, 3, 4, 5}
+	i.replica.MaxInstanceNum[i.rowId+1] = 10
+	i.replica.InstanceMatrix[i.rowId+1][9] = commonTestlibCloneInstance(i)
+	expectedDeps := data.Dependencies{1, 2, 9, 4, 5}
 	expectedSeq := uint32(1)
 
 	act, msg = i.handlePreAccept(p)
@@ -2297,7 +2308,7 @@ func TestHandlePreAccept(t *testing.T) {
 	assert.Equal(t, act, replyAction)
 	assert.Equal(t, msg, &data.PreAcceptReply{
 		Ok:         true,
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Seq:        expectedSeq,
 		Deps:       expectedDeps,
@@ -2311,7 +2322,7 @@ func TestHandlePreAccept(t *testing.T) {
 	assert.Equal(t, act, replyAction)
 	assert.Equal(t, msg, &data.PreAcceptReply{
 		Ok:         true,
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Seq:        expectedSeq,
 		Deps:       expectedDeps,
@@ -2319,21 +2330,250 @@ func TestHandlePreAccept(t *testing.T) {
 	})
 }
 
-// It's testing `handleprepare` will return (replyaction, correct prepare-reply)
-func TestHandlePrepare(t *testing.T) {
+// TestHandlePreAcceptOk tests the correctness of handlePreAcceptOk
+func TestHandlePreAcceptOk(t *testing.T) {
 	i := commonTestlibExamplePreAcceptedInstance()
+	p := &data.PreAcceptOk{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+	}
+
+	initialBallot := i.replica.makeInitialBallot()
+	largeBallot := initialBallot.IncNumClone()
+
+	// should panic if i is not at initial round
+	i.ballot = largeBallot
+	assert.Panics(t, func() { i.handlePreAcceptOk(p) })
+
+	i.ballot = initialBallot
+
+	// should receive noAction and nil message since
+	// we haven't got enough replies
+	act, msg := i.handlePreAcceptOk(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.info.preAcceptOkCount, 1)
+
+	// should receive broadcastAction and a commit message
+	i.info.preAcceptOkCount = i.replica.fastQuorum() - 1
+	act, msg = i.handlePreAcceptOk(p)
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       i.cmds,
+		Seq:        i.seq,
+		Deps:       i.deps,
+	})
+	assert.Equal(t, i.status, committed)
+
+	// should panic since we should have changed to other state
+	assert.Panics(t, func() { i.handlePreAcceptOk(p) })
+}
+
+// This func tests the correctness of handlePreAcceptReply
+func TestHandlePreAcceptReply(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
+	p := &data.PreAcceptReply{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+	}
+	smallBallot := i.replica.makeInitialBallot()
+	largeBallot := smallBallot.IncNumClone()
+
+	i.ballot = largeBallot
+	p.Ballot = smallBallot
+
+	// should panic
+	assert.Panics(t, func() { i.handlePreAcceptReply(p) })
+
+	// should panic too
+	i.ballot = smallBallot
+	p.Ballot = largeBallot
+	p.Ok = true
+	assert.Panics(t, func() { i.handlePreAcceptReply(p) })
+
+	// i should update its ballot and return noAction and nil message
+	p.Ok = false
+	act, msg := i.handlePreAcceptReply(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.ballot, largeBallot)
+
+	i.ballot = smallBallot
+	p.Ballot = smallBallot
+	p.Deps = commonTestlibExampleDeps()
+	p.Ok = true
+
+	// receive the first reply, nothing should happens
+	act, msg = i.handlePreAcceptReply(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.info.samePreAcceptReplies, true)
+	assert.Equal(t, i.info.preAcceptReplyCount, 1)
+
+	// receive the second not same reply,
+	// i should send out accept message (since total replica size is 5)
+	i = commonTestlibExamplePreAcceptedInstance()
+	i.ballot = smallBallot
+	p.Ballot = smallBallot
+	i.info.preAcceptReplyCount = 1
+	act, msg = i.handlePreAcceptReply(p)
+
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     smallBallot,
+		Seq:        i.seq,
+		Deps:       i.deps,
+		Cmds:       i.cmds,
+	})
+}
+
+// TestHandleAccept tests the correctness of handlePreAcceptOk
+func TestHandleAccept(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
+	cmds := commonTestlibExampleCommands()
+	seq := uint32(42)
+	deps := commonTestlibExampleDeps()
 	smallerBallot := i.replica.makeInitialBallot()
 	largerBallot := smallerBallot.IncNumClone()
 
+	i.ballot = largerBallot
+
+	a := &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        seq,
+		Deps:       deps,
+		Ballot:     smallerBallot,
+	}
+
+	// should panic if the instance has a larger ballot
+	assert.Panics(t, func() { i.handleAccept(a) })
+
+	// should panic if the instance is already committed
+	i.ballot = smallerBallot
+	i.status = committed
+	assert.Panics(t, func() { i.handleAccept(a) })
+
+	// should panic if the instance is at accepted status,
+	// this means the instance receives the same accept twice,
+	// which is not going to happen.
+	i.status = accepted
+	i.ballot = smallerBallot
+	assert.Panics(t, func() { i.handleAccept(a) })
+
+	// test response
+	i.status = preAccepted
+	a.Ballot = largerBallot
+	act, msg := i.handleAccept(a)
+
+	assert.Equal(t, act, replyAction)
+	assert.Equal(t, msg, &data.AcceptReply{
+		Ok:         true,
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     largerBallot,
+	})
+}
+
+// TestHandleAcceptReply tests the correctness of the handleAcceptReply
+func TestHandleAcceptReply(t *testing.T) {
+	i := commonTestlibExampleAcceptedInstance()
+	cmds := commonTestlibExampleCommands()
+	seq := uint32(42)
+	deps := commonTestlibExampleDeps()
+
+	i.cmds = cmds.Clone()
+	i.deps = deps.Clone()
+
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	a := &data.AcceptReply{
+		Ok:         true,
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     smallerBallot,
+	}
+	i.ballot = largerBallot
+
+	// should panic if the instance has a larger ballot
+	assert.Panics(t, func() { i.handleAcceptReply(a) })
+
+	// should panic if the reply has a larger ballot, but ok == true
+	a.Ballot = largerBallot
+	i.ballot = smallerBallot
+	assert.Panics(t, func() { i.handleAcceptReply(a) })
+
+	a.Ok = false
+	a.Ballot = largerBallot
+	i.ballot = smallerBallot
+	act, msg := i.handleAcceptReply(a)
+
+	// act should be noAction, and msg should be nil, since
+	// i will step down
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.ballot, largerBallot)
+
+	a.Ok = false
+	a.Ballot = smallerBallot
+	i.ballot = smallerBallot
+
+	//should panic if a.Ballot == i.ballo, but a.Ok == false
+	assert.Panics(t, func() { i.handleAcceptReply(a) })
+
+	a.Ok = true
+	i.info.acceptReplyCount = i.replica.quorum() - 2
+	act, msg = i.handleAcceptReply(a)
+
+	// should be noAction and nil message, since i hasn't
+	// received enough replies yet
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.info.acceptReplyCount, i.replica.quorum()-1)
+
+	// now i has received enough replies,
+	// it should return broadcastAction and a commit message
+	act, msg = i.handleAcceptReply(a)
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        seq,
+		Deps:       deps,
+	})
+
+	// should panic since i should call handleAcceptReply after it
+	// changes to committed status
+	assert.Panics(t, func() { i.handleAcceptReply(a) })
+}
+
+// It's testing `handleprepare` will return (replyaction, correct prepare-reply)
+func TestHandlePrepare(t *testing.T) {
+	i := commonTestlibExamplePreAcceptedInstance()
+
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	i.rowId = i.replica.Id
 	i.ballot = smallerBallot
 	i.deps = data.Dependencies{3, 4, 5, 6, 7}
 
 	prepare := &data.Prepare{
-		ReplicaId:  i.replica.Id,
+		ReplicaId:  i.rowId,
 		InstanceId: i.id,
-		Ballot:     largerBallot,
 	}
 
+	prepare.Ballot = smallerBallot
+	assert.Panics(t, func() { i.handlePrepare(prepare) })
+
+	prepare.Ballot = largerBallot
 	action, reply := i.handlePrepare(prepare)
 
 	assert.Equal(t, action, replyAction)
@@ -2394,6 +2634,460 @@ func TestHandleCommit(t *testing.T) {
 	i = commonTestlibExampleNilStatusInstance()
 	i.handleCommit(cm)
 	assert.Equal(t, i.status, committed)
+
+	i = commonTestlibExampleCommittedInstance()
+	assert.Panics(t, func() { i.handleCommit(cm) })
+}
+
+// This func tests the correctness of handlePrepareReply
+func TestHandlePrepareReply(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+	cmds := commonTestlibExampleCommands()
+	deps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         committed,
+		Seq:            42,
+		Cmds:           cmds,
+		Deps:           deps,
+		Ballot:         largerBallot,
+		OriginalBallot: smallerBallot,
+		IsFromLeader:   false,
+	}
+
+	// should panic if i is not at prepare status
+	i.status = committed
+	assert.Panics(t, func() { i.handlePrepareReply(p) })
+
+	// should panic if p has a smaller ballot, which means the reply is stale
+	i.status = preparing
+	i.ballot = largerBallot
+	p.Ballot = smallerBallot
+	assert.Panics(t, func() { i.handlePrepareReply(p) })
+
+	// should panic if p has a larger ballot, but its Ok == true
+	i.ballot = smallerBallot
+	p.Ballot = largerBallot
+	p.Ok = true
+	assert.Panics(t, func() { i.handlePrepareReply(p) })
+
+	// should return noAction and nil,
+	// and i's ballot should be updated
+	p.Ok = false
+	act, msg := i.handlePrepareReply(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+	assert.Equal(t, i.ballot, largerBallot)
+
+	// should panic if i have already received enough replies
+	i.ballot = smallerBallot
+	p.Ballot = smallerBallot
+	p.Ok = true
+	i.recoveryInfo.replyCount = i.replica.quorum()
+	assert.Panics(t, func() { i.handlePrepareReply(p) })
+
+	// should return noAction, nil, since we haven't received enough replies
+	i = commonTestlibExamplePreparingInstance()
+	i.ballot = smallerBallot
+	i.recoveryInfo.replyCount = i.replica.quorum() - 2
+	p.Status = accepted
+	act, msg = i.handlePrepareReply(p)
+	assert.Equal(t, act, noAction)
+	assert.Equal(t, msg, nil)
+
+	// should return broadcastAction, commit
+	p.Status = committed
+	act, msg = i.handlePrepareReply(p)
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        42,
+		Deps:       deps,
+	})
+}
+
+// *******************************************
+// ***** Tests for prepare-reply helpers *****
+// *******************************************
+
+func TestUpdateReocveryInstance(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+	cmds := commonTestlibExampleCommands()
+	deps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         committed,
+		Seq:            42,
+		Cmds:           cmds,
+		Deps:           deps,
+		Ballot:         smallerBallot,
+		OriginalBallot: largerBallot,
+		IsFromLeader:   false,
+	}
+
+	// should panic if p has invalid status
+	p.Status = preparing
+	assert.Panics(t, func() { i.updateRecoveryInstance(p) })
+
+	// go through all the path
+	p.Status = committed
+	i.updateRecoveryInstance(p)
+	p.Status = accepted
+	i.updateRecoveryInstance(p)
+	p.Status = preAccepted
+	i.updateRecoveryInstance(p)
+	p.Status = nilStatus
+	i.updateRecoveryInstance(p)
+}
+
+func TestHandleCommittedPrepareReply(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	iSeq := i.recoveryInfo.seq
+	iDeps := i.recoveryInfo.deps.Clone()
+	iCmds := i.recoveryInfo.cmds.Clone()
+	iBallot := i.recoveryInfo.ballot.Clone()
+
+	pCmds := commonTestlibExampleCommands()
+	pDeps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         committed,
+		Seq:            42,
+		Cmds:           pCmds,
+		Deps:           pDeps,
+		Ballot:         smallerBallot,
+		OriginalBallot: largerBallot,
+		IsFromLeader:   false,
+	}
+
+	// nothing should be changed if i has already received a committed reply
+	i.recoveryInfo.status = committed
+	i.handleCommittedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, iBallot)
+	assert.Equal(t, i.recoveryInfo.status, committed)
+
+	// should update the recoveryInfo if i has not received a committed reply yet
+	i.recoveryInfo.status = nilStatus
+
+	i.handleCommittedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, committed)
+}
+
+func TestHandleAcceptedPrepareReply(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	iSeq := i.recoveryInfo.seq
+	iDeps := i.recoveryInfo.deps.Clone()
+	iCmds := i.recoveryInfo.cmds.Clone()
+	iBallot := i.recoveryInfo.ballot.Clone()
+
+	pCmds := commonTestlibExampleCommands()
+	pDeps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         accepted,
+		Seq:            42,
+		Cmds:           pCmds,
+		Deps:           pDeps,
+		Ballot:         largerBallot,
+		OriginalBallot: smallerBallot,
+		IsFromLeader:   false,
+	}
+	i.recoveryInfo.status = committed
+
+	// should not change the recoveryInfo if
+	// i has received a later status than accepted from the replies
+	i.handleAcceptedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, iBallot)
+	assert.Equal(t, i.recoveryInfo.status, committed)
+
+	// should update the recoveryInfo if
+	// i has not received a later status than accepted from the replies yet
+	i.recoveryInfo.status = preAccepted
+	i.handleAcceptedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, smallerBallot)
+	assert.Equal(t, i.recoveryInfo.status, accepted)
+
+	// should not change the recoveryInfo if
+	// i has received an accepted-reply with larger ballot
+	i = commonTestlibExamplePreparingInstance()
+	i.recoveryInfo.status = accepted
+	i.recoveryInfo.ballot = largerBallot
+	i.handleAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, accepted)
+
+	// should update the recoveryInfo if
+	// p has a larger ballot than all the replies
+	// that i has ever received
+	i.recoveryInfo.ballot = smallerBallot
+	p.OriginalBallot = largerBallot
+	i.handleAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, accepted)
+}
+
+func TestHandlePreAcceptedPrepareReply(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	iSeq := i.recoveryInfo.seq
+	iDeps := i.recoveryInfo.deps.Clone()
+	iCmds := i.recoveryInfo.cmds.Clone()
+	iBallot := i.recoveryInfo.ballot.Clone()
+
+	pCmds := commonTestlibExampleCommands()
+	pDeps := commonTestlibExampleDeps()
+	p := &data.PrepareReply{
+		Ok:             false,
+		ReplicaId:      i.rowId,
+		InstanceId:     i.id,
+		Status:         preAccepted,
+		Seq:            42,
+		Cmds:           pCmds,
+		Deps:           pDeps,
+		Ballot:         largerBallot,
+		OriginalBallot: smallerBallot,
+		IsFromLeader:   false,
+	}
+
+	// should not change the recoveryInfo if
+	// i has received a later status than pre-accepted from the replies
+	i.recoveryInfo.status = accepted
+	i.handlePreAcceptedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, iBallot)
+	assert.Equal(t, i.recoveryInfo.status, accepted)
+
+	// should update the recoveryInfo if
+	// i has not received a later status than pre-accepted from the replies yet
+	i.recoveryInfo.status = nilStatus
+	i.handlePreAcceptedPrepareReply(p)
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, smallerBallot)
+	assert.Equal(t, i.recoveryInfo.status, preAccepted)
+	// identicalCount should be 1 since the reply if from a member of fast quorom
+	assert.Equal(t, i.recoveryInfo.identicalCount, 1)
+
+	// should not change the recoveryInfo if
+	// i has received an pre-accepted-reply with larger ballot
+	i = commonTestlibExamplePreparingInstance()
+	i.recoveryInfo.status = preAccepted
+	i.recoveryInfo.ballot = largerBallot
+	i.handlePreAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, iSeq)
+	assert.Equal(t, i.recoveryInfo.deps, iDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, iCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, preAccepted)
+
+	// should update the recoveryInfo if
+	// p has a larger ballot than all the replies
+	// that i has ever received
+	i.recoveryInfo.ballot = smallerBallot
+	p.OriginalBallot = largerBallot
+	i.handlePreAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, largerBallot)
+	assert.Equal(t, i.recoveryInfo.status, preAccepted)
+	// identicalCount should be zero
+	assert.Equal(t, i.recoveryInfo.identicalCount, 0)
+
+	// should increase the identicalCount when receiving
+	// an identical reply
+	i = commonTestlibExamplePreparingInstance()
+	i.recoveryInfo.status = nilStatus
+	i.recoveryInfo.ballot = smallerBallot
+	p.OriginalBallot = smallerBallot
+	i.handlePreAcceptedPrepareReply(p)
+	i.handlePreAcceptedPrepareReply(p)
+
+	assert.Equal(t, i.recoveryInfo.seq, uint32(42))
+	assert.Equal(t, i.recoveryInfo.deps, pDeps)
+	assert.Equal(t, i.recoveryInfo.cmds, pCmds)
+	assert.Equal(t, i.recoveryInfo.ballot, smallerBallot)
+	assert.Equal(t, i.recoveryInfo.status, preAccepted)
+	// identicalCount should be 2
+	assert.Equal(t, i.recoveryInfo.identicalCount, 2)
+}
+
+func TestMakeRecoveryDecision(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+
+	smallerBallot := i.replica.makeInitialBallot()
+	largerBallot := smallerBallot.IncNumClone()
+
+	cmds := commonTestlibExampleCommands()
+	deps := commonTestlibExampleDeps()
+
+	// should get broadcastAction and commit message
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = committed
+	i.recoveryInfo.cmds = cmds
+	i.recoveryInfo.seq = 42
+	i.recoveryInfo.deps = deps
+	i.recoveryInfo.ballot = largerBallot
+
+	act, msg := i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Commit{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Deps:       deps,
+		Seq:        42,
+	})
+
+	// should get broadcastAction and accept message
+	i = commonTestlibExamplePreparingInstance()
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = accepted
+	i.recoveryInfo.cmds = cmds
+	i.recoveryInfo.seq = 42
+	i.recoveryInfo.deps = deps
+	i.recoveryInfo.ballot = largerBallot
+
+	act, msg = i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        42,
+		Deps:       deps,
+		Ballot:     largerBallot,
+	})
+
+	// should get broadcastAction and accept message
+	i = commonTestlibExamplePreparingInstance()
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = preAccepted
+	i.recoveryInfo.cmds = cmds
+	i.recoveryInfo.seq = 42
+	i.recoveryInfo.deps = deps
+	i.recoveryInfo.identicalCount = i.replica.quorum()
+	i.recoveryInfo.ballot = largerBallot
+
+	act, msg = i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        42,
+		Deps:       deps,
+		Ballot:     largerBallot,
+	})
+
+	// should get broadcastAction and pre-accept message
+	i = commonTestlibExamplePreparingInstance()
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = preAccepted
+	i.recoveryInfo.cmds = cmds
+	i.recoveryInfo.seq = 42
+	i.recoveryInfo.deps = deps
+	i.recoveryInfo.identicalCount = i.replica.quorum() - 1
+	i.recoveryInfo.ballot = largerBallot
+
+	act, msg = i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.PreAccept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       cmds,
+		Seq:        42,
+		Deps:       deps,
+		Ballot:     largerBallot,
+	})
+
+	// should get broadcastAction and accept message with commands = no-op
+	i = commonTestlibExamplePreparingInstance()
+	i.initRecoveryInfo()
+	i.recoveryInfo.status = nilStatus
+	i.recoveryInfo.cmds = nil
+	i.recoveryInfo.seq = 0
+	i.recoveryInfo.deps = data.Dependencies{0, 0, 0, 0, 0}
+	i.recoveryInfo.identicalCount = i.replica.quorum() - 1
+
+	act, msg = i.makeRecoveryDecision()
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Accept{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Cmds:       nil,
+		Seq:        0,
+		Deps:       data.Dependencies{0, 0, 0, 0, 0},
+		Ballot:     i.ballot,
+	})
+
+	i.recoveryInfo.status = nilStatus - 1
+	assert.Panics(t, func() { i.makeRecoveryDecision() })
+}
+
+// Tests for getters
+func TestInstanceGetters(t *testing.T) {
+	cmds := commonTestlibExampleCommands()
+	deps := commonTestlibExampleDeps()
+
+	i := &Instance{
+		cmds: cmds,
+		seq:  42,
+		deps: deps,
+	}
+
+	assert.Equal(t, i.Commands(), cmds)
+	assert.Equal(t, i.Seq(), uint32(42))
+	assert.Equal(t, i.Dependencies(), deps)
 }
 
 // TestCheckStatus tests the behaviour of checkStatus,

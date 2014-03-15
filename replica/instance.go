@@ -663,14 +663,13 @@ func (i *Instance) handleAccept(a *data.Accept) (action uint8, msg *data.AcceptR
 // if receiving majority replies with ok == true,
 //    then broadcast Commit
 // otherwise: do nothing.
-func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg *data.Commit) {
+func (i *Instance) handleAcceptReply(a *data.AcceptReply) (action uint8, msg Message) {
 	if a.Ballot.Compare(i.ballot) < 0 {
 		panic("")
 	}
 
 	// negative reply
 	if a.Ballot.Compare(i.ballot) > 0 {
-
 		// [*] there may be stale but large ballots,
 		// if we receive such ballots, that means there may be another newer proposer,
 		// so we'd better step down by increasing our own ballot so we can ignore
@@ -723,9 +722,10 @@ func (i *Instance) revertAndHandlePrepare(p *data.Prepare) (action uint8, msg *d
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
 	oldBallot := i.ballot.Clone()
 
-	// We optimize the case of committed instance in reply with ok=true message
-	// and no need to update self ballot.
-	// So only non-committed instance needs to update self ballot.
+	// if the instance is alreay a commited one,
+	// then it just replies with ok == true,
+	// and does not update its ballot, so only
+	// non-committed instance will need to update self ballot.
 	if !i.isAtStatus(committed) {
 		if p.Ballot.Compare(i.ballot) <= 0 { // cannot be equal or smaller
 			panic(fmt.Sprintln("prepare ballot: ", p.Ballot, i.ballot))
@@ -851,11 +851,8 @@ func (i *Instance) handleAcceptedPrepareReply(p *data.PrepareReply) {
 	}
 
 	// for same status accepted reply, we will keep the one of largest ballot.
-	if ir.ballot.Compare(p.OriginalBallot) > 0 {
+	if ir.ballot.Compare(p.OriginalBallot) >= 0 {
 		return
-	}
-	if ir.ballot.Compare(p.OriginalBallot) == 0 {
-		panic("")
 	}
 
 	ir.updateByPrepareReply(p)
@@ -883,7 +880,6 @@ func (i *Instance) handlePreAcceptedPrepareReply(p *data.PrepareReply) {
 		// Obviously, p.Ballot is not initial ballot,
 		// in this case, we won't send accept next.
 		ir.updateByPrepareReply(p)
-		ir.identicalCount = 0
 		return
 	}
 
