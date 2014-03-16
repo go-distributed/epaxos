@@ -60,7 +60,7 @@ type Instance struct {
 	executed bool
 
 	// tarjan SCC
-	sccIndex int
+	sccIndex   int
 	sccLowlink int
 }
 

@@ -97,6 +97,8 @@ func New(param *Param) (r *Replica) {
 		StateMachine:     sm,
 		Epoch:            epochStart,
 		MessageEventChan: make(chan *MessageEvent),
+		sccStack:         list.New(),
+		sccResult:        list.New(),
 	}
 
 	for i := uint8(0); i < size; i++ {
@@ -349,8 +351,8 @@ func (r *Replica) findAndExecute() {
 
 // NOTE: atomic
 func (r *Replica) execute(i *Instance) bool {
-	r.sccStack = list.New()
-	r.sccResult = list.New()
+	r.sccStack.Init()
+	r.sccResult.Init()
 	r.sccIndex = 1
 	if ok := r.resolveConflicts(i); !ok {
 		return false
@@ -404,13 +406,12 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 	}
 
 	if node.sccLowlink == node.sccIndex {
-		var neighbor *Instance
-
-		for neighbor == nil ||
-			node.rowId != neighbor.rowId ||
-			node.id != neighbor.id {
-			neighbor = r.popSccStack()
-			r.sccResult.PushBack(neighbor)
+		for {
+			n := r.popSccStack()
+			r.sccResult.PushBack(n)
+			if node == n {
+				break
+			}
 		}
 	}
 
@@ -421,7 +422,7 @@ func (r *Replica) inSccStack(other *Instance) bool {
 	iter := r.sccStack.Front()
 	for iter != nil {
 		self := iter.Value.(*Instance)
-		if self.rowId == other.rowId && self.id == other.id {
+		if self == other {
 			return true
 		}
 		iter = iter.Next()
