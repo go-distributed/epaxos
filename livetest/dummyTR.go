@@ -14,7 +14,7 @@ type DummyTransporter struct {
 func (tr *DummyTransporter) Send(to uint8, msg replica.Message) {
 	go func() {
 		r := tr.Nodes[to]
-		r.EventChan <- &replica.Event{tr.Self, msg}
+		r.MessageEventChan <- &replica.MessageEvent{tr.Self, msg}
 	}()
 }
 

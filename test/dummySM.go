@@ -15,7 +15,7 @@ func (d *DummySM) Execute(c []data.Command) ([]interface{}, error) {
 		if bytes.Compare(c[i], data.Command("error")) == 0 {
 			return nil, errors.New("error")
 		}
-		result = append(result, "ok")
+		result = append(result, string(c[i]))
 	}
 	return result, nil
 }
