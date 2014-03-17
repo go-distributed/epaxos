@@ -1039,3 +1039,11 @@ func (i *Instance) checkStatus(statusList ...uint8) {
 		panic("")
 	}
 }
+
+func (i *Instance) Executed() bool {
+	return i.executed
+}
+
+func (i *Instance) SetExecuted() {
+	i.executed = true
+}

@@ -90,7 +90,7 @@ func New(param *Param) (r *Replica) {
 		Id:               replicaId,
 		Size:             size,
 		MaxInstanceNum:   make([]uint64, size),
-		ProposeNum:       1,
+		ProposeNum:       1, // instance.id start from 1
 		CheckpointCycle:  cycle,
 		ExecutedUpTo:     make([]uint64, size),
 		InstanceMatrix:   make([][]*Instance, size),
@@ -337,7 +337,7 @@ func (r *Replica) findAndExecute() {
 			if instance == nil || !instance.isAtStatus(committed) {
 				break
 			}
-			if instance.executed {
+			if instance.Executed() {
 				r.ExecutedUpTo[i]++
 				continue
 			}
@@ -380,14 +380,19 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 	node.sccLowlink = r.sccIndex
 	r.sccIndex++
 
-	r.sccStack.PushBack(node)
+	r.pushSccStack(node)
 	for iSpace := 0; iSpace < int(r.Size); iSpace++ {
 		dep := node.deps[iSpace]
+		if dep == conflictNotFound || r.IsCheckpoint(dep) {
+			continue
+		}
+
 		neighbor := r.InstanceMatrix[iSpace][dep]
 		if neighbor.status != committed {
 			return false
 		}
-		if neighbor.executed {
+
+		if neighbor.Executed() {
 			continue
 		}
 
@@ -399,8 +404,8 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 				node.sccLowlink = neighbor.sccLowlink
 			}
 		} else if r.inSccStack(neighbor) {
-			if neighbor.sccLowlink < node.sccLowlink {
-				node.sccLowlink = neighbor.sccLowlink
+			if neighbor.sccIndex < node.sccLowlink {
+				node.sccLowlink = neighbor.sccIndex
 			}
 		}
 	}
@@ -408,7 +413,7 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 	if node.sccLowlink == node.sccIndex {
 		for {
 			n := r.popSccStack()
-			r.sccResult.PushBack(n)
+			r.pushSccResult(n)
 			if node == n {
 				break
 			}
@@ -416,6 +421,14 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 	}
 
 	return true
+}
+
+func (r *Replica) pushSccStack(i *Instance) {
+	r.sccStack.PushBack(i)
+}
+
+func (r *Replica) pushSccResult(i *Instance) {
+	r.sccResult.PushBack(i)
 }
 
 func (r *Replica) inSccStack(other *Instance) bool {
