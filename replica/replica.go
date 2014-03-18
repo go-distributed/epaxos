@@ -90,13 +90,15 @@ func New(param *Param) (r *Replica) {
 		Id:               replicaId,
 		Size:             size,
 		MaxInstanceNum:   make([]uint64, size),
-		ProposeNum:       1,
+		ProposeNum:       1, // instance.id start from 1
 		CheckpointCycle:  cycle,
 		ExecutedUpTo:     make([]uint64, size),
 		InstanceMatrix:   make([][]*Instance, size),
 		StateMachine:     sm,
 		Epoch:            epochStart,
 		MessageEventChan: make(chan *MessageEvent),
+		sccStack:         list.New(),
+		sccResult:        list.New(),
 	}
 
 	for i := uint8(0); i < size; i++ {
@@ -335,7 +337,7 @@ func (r *Replica) findAndExecute() {
 			if instance == nil || !instance.isAtStatus(committed) {
 				break
 			}
-			if instance.executed {
+			if instance.Executed() {
 				r.ExecutedUpTo[i]++
 				continue
 			}
@@ -349,8 +351,8 @@ func (r *Replica) findAndExecute() {
 
 // NOTE: atomic
 func (r *Replica) execute(i *Instance) bool {
-	r.sccStack = list.New()
-	r.sccResult = list.New()
+	r.sccStack.Init()
+	r.sccResult.Init()
 	r.sccIndex = 1
 	if ok := r.resolveConflicts(i); !ok {
 		return false
@@ -378,14 +380,19 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 	node.sccLowlink = r.sccIndex
 	r.sccIndex++
 
-	r.sccStack.PushBack(node)
+	r.pushSccStack(node)
 	for iSpace := 0; iSpace < int(r.Size); iSpace++ {
 		dep := node.deps[iSpace]
+		if dep == conflictNotFound || r.IsCheckpoint(dep) {
+			continue
+		}
+
 		neighbor := r.InstanceMatrix[iSpace][dep]
 		if neighbor.status != committed {
 			return false
 		}
-		if neighbor.executed {
+
+		if neighbor.Executed() {
 			continue
 		}
 
@@ -397,31 +404,38 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 				node.sccLowlink = neighbor.sccLowlink
 			}
 		} else if r.inSccStack(neighbor) {
-			if neighbor.sccLowlink < node.sccLowlink {
-				node.sccLowlink = neighbor.sccLowlink
+			if neighbor.sccIndex < node.sccLowlink {
+				node.sccLowlink = neighbor.sccIndex
 			}
 		}
 	}
 
 	if node.sccLowlink == node.sccIndex {
-		var neighbor *Instance
-
-		for neighbor == nil ||
-			node.rowId != neighbor.rowId ||
-			node.id != neighbor.id {
-			neighbor = r.popSccStack()
-			r.sccResult.PushBack(neighbor)
+		for {
+			n := r.popSccStack()
+			r.pushSccResult(n)
+			if node == n {
+				break
+			}
 		}
 	}
 
 	return true
 }
 
+func (r *Replica) pushSccStack(i *Instance) {
+	r.sccStack.PushBack(i)
+}
+
+func (r *Replica) pushSccResult(i *Instance) {
+	r.sccResult.PushBack(i)
+}
+
 func (r *Replica) inSccStack(other *Instance) bool {
 	iter := r.sccStack.Front()
 	for iter != nil {
 		self := iter.Value.(*Instance)
-		if self.rowId == other.rowId && self.id == other.id {
+		if self == other {
 			return true
 		}
 		iter = iter.Next()

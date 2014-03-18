@@ -60,7 +60,7 @@ type Instance struct {
 	executed bool
 
 	// tarjan SCC
-	sccIndex int
+	sccIndex   int
 	sccLowlink int
 }
 
@@ -1038,4 +1038,12 @@ func (i *Instance) checkStatus(statusList ...uint8) {
 	if !ok {
 		panic("")
 	}
+}
+
+func (i *Instance) Executed() bool {
+	return i.executed
+}
+
+func (i *Instance) SetExecuted() {
+	i.executed = true
 }

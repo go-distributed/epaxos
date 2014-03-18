@@ -35,6 +35,15 @@ func commonTestlibUnionedDeps() data.Dependencies {
 	return deps
 }
 
+func commonTestlibExampleReplica() *Replica {
+	param := &Param{
+		ReplicaId:    0,
+		Size:         5,
+		StateMachine: new(test.DummySM),
+	}
+	return New(param)
+}
+
 func commonTestlibExampleInstance() *Instance {
 	param := &Param{
 		ReplicaId:    0,
@@ -2998,4 +3007,11 @@ func TestCheckStatus(t *testing.T) {
 
 	assert.Panics(t, func() { i.checkStatus(preAccepted, accepted, preparing) })
 	assert.NotPanics(t, func() { i.checkStatus(committed) })
+}
+
+func TestExecuted(t *testing.T) {
+	i := &Instance{}
+	assert.False(t, i.Executed())
+	i.SetExecuted()
+	assert.True(t, i.Executed())
 }
