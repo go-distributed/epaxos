@@ -54,6 +54,8 @@ type Replica struct {
 	Size             uint8
 	MaxInstanceNum   []uint64 // the highest instance number seen for each replica
 	ProposeNum       uint64
+	ProposeChan      chan data.Command
+	BatchInterval    time.Duration
 	CheckpointCycle  uint64
 	ExecutedUpTo     []uint64
 	InstanceMatrix   [][]*Instance
@@ -73,6 +75,7 @@ type Param struct {
 	Size            uint8
 	StateMachine    epaxos.StateMachine
 	CheckpointCycle uint64
+	BatchInterval   time.Duration
 }
 
 type MessageEvent struct {
@@ -96,6 +99,8 @@ func New(param *Param) (r *Replica) {
 		Size:             size,
 		MaxInstanceNum:   make([]uint64, size),
 		ProposeNum:       1, // instance.id start from 1
+		ProposeChan:      make(chan data.Command),
+		BatchInterval:    5 * time.Millisecond,
 		CheckpointCycle:  cycle,
 		ExecutedUpTo:     make([]uint64, size),
 		InstanceMatrix:   make([][]*Instance, size),
@@ -118,6 +123,7 @@ func New(param *Param) (r *Replica) {
 func (r *Replica) Start() {
 	go r.eventLoop()
 	go r.executeLoop()
+	go r.proposeLoop()
 }
 
 // handling events
@@ -140,8 +146,35 @@ func (r *Replica) executeLoop() {
 	}
 }
 
+func (r *Replica) proposeLoop() {
+	proposeTicker := time.Tick(r.BatchInterval)
+
+	bufferedCmds := make([]data.Command, 0)
+
+	for {
+		select {
+		case cmd := <-r.ProposeChan:
+			bufferedCmds = append(bufferedCmds, cmd)
+		case <-proposeTicker:
+			if len(bufferedCmds) == 0 {
+				break
+			}
+			r.BatchPropose(bufferedCmds)
+			bufferedCmds = bufferedCmds[:0]
+		}
+	}
+}
+
 // TODO: This must be done in a synchronized/atomic way.
-func (r *Replica) Propose(cmds data.Commands) {
+func (r *Replica) Propose(cmd data.Command) {
+	r.ProposeChan <- cmd
+}
+
+// TODO: This must be done in a synchronized/atomic way.
+func (r *Replica) BatchPropose(batchedCmds data.Commands) {
+	cmds := make([]data.Command, len(batchedCmds))
+	copy(cmds, batchedCmds)
+
 	mevent := &MessageEvent{
 		From: r.Id,
 		Message: &data.Propose{
@@ -339,7 +372,7 @@ func (r *Replica) findAndExecute() {
 			if instance == nil || !instance.isAtStatus(committed) {
 				break
 			}
-			if instance.Executed() {
+			if instance.isExecuted() {
 				r.ExecutedUpTo[i]++
 				continue
 			}
@@ -369,11 +402,10 @@ func (r *Replica) execute(i *Instance) error {
 		return errConflictsNotFullyResolved
 	}
 	// execute elements in the result list
-	// the list will maintain the order of nodes that:
-	// - The lower level strongly connected component locates at smaller index.
-	// - In the same component, nodes at higher instance space index locates
-	// - at smaller index.
-
+	// nodes of the list are in order that:
+	// - nodes SCC being dependent are at smaller index than
+	// - - nodes depending on it.
+	// - In the same component, nodes at higher rowId are at smaller index.
 	if err := r.executeList(); err != nil {
 		return err
 	}
@@ -395,8 +427,7 @@ func (r *Replica) executeList() error {
 }
 
 // Assumption:
-// - If a node is executed, then all the strongly connected components it belongs to or
-// - lower than its has been executed. This is useful to reduce search space.
+// - If a node is executed, all SCC it belongs to or depending has been executed.
 func (r *Replica) resolveConflicts(node *Instance) bool {
 	if node == nil || !node.isAtStatus(committed) {
 		panic("")
@@ -418,7 +449,7 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 			return false
 		}
 
-		if neighbor.Executed() {
+		if neighbor.isExecuted() {
 			continue
 		}
 
