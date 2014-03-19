@@ -2,20 +2,29 @@ package test
 
 import (
 	"bytes"
-	"errors"
 
+	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/data"
 )
 
-type DummySM bool
+type DummySM struct {
+	ExecutionLog []string
+}
+
+func NewDummySM() *DummySM {
+	return &DummySM{
+		ExecutionLog: make([]string, 0),
+	}
+}
 
 func (d *DummySM) Execute(c []data.Command) ([]interface{}, error) {
 	result := make([]interface{}, 0)
 	for i := range c {
 		if bytes.Compare(c[i], data.Command("error")) == 0 {
-			return nil, errors.New("error")
+			return nil, epaxos.ErrStateMachineExecution
 		}
 		result = append(result, string(c[i]))
+		d.ExecutionLog = append(d.ExecutionLog, string(c[i]))
 	}
 	return result, nil
 }

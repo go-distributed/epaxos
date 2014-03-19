@@ -135,6 +135,10 @@ func (i *Instance) isAtOrAfterStatus(status uint8) bool {
 	return i.status >= status
 }
 
+func (i *Instance) isBeforeStatus(status uint8) bool {
+	return i.status < status
+}
+
 func (i *Instance) isAtInitialRound() bool {
 	return i.ballot.Epoch() == 0
 }
