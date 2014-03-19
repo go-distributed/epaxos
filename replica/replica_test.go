@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/data"
 	"github.com/go-distributed/epaxos/test"
 	"github.com/stretchr/testify/assert"
@@ -140,6 +141,10 @@ func TestResolveConflictsWithNoDeps(t *testing.T) {
 		r.InstanceMatrix[i][1] = NewInstance(r, uint8(i), 1)
 	}
 
+	// should panic since the instance is not committed
+	assert.Panics(t, func() { r.resolveConflicts(r.InstanceMatrix[0][1]) })
+
+	r.InstanceMatrix[0][1].status = committed
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][1]))
 	assert.Equal(t, r.sccResult.Len(), 1)
 	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][1])
@@ -156,6 +161,8 @@ func TestResolveConflictsWithSimpleDeps(t *testing.T) {
 	}
 	r.InstanceMatrix[0][3] = NewInstance(r, 0, 3)
 	r.InstanceMatrix[0][3].deps = data.Dependencies{2, 3, 4, 5, 6}
+	r.InstanceMatrix[0][3].status = committed
+
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][3]))
 	assert.Equal(t, r.sccResult.Len(), 6)
 
@@ -371,4 +378,130 @@ func TestResolveConflictsWithSccDepsAndexecutedInstance(t *testing.T) {
 		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+4])
 	}
 	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][6])
+}
+
+// a helper to make committed instances, containing scc, no un-committed, nor executed instances
+func makeCommitedInstances(r *Replica) {
+	r.InstanceMatrix[0][6] = NewInstance(r, 0, 6)
+	r.InstanceMatrix[0][6].cmds = data.Commands{
+		data.Command("[0][6]"),
+		data.Command("[0][6]"),
+	}
+	r.InstanceMatrix[0][6].status = committed
+	r.InstanceMatrix[0][6].deps = data.Dependencies{4, 5, 6, 7, 8}
+
+	// create 1st level deps (4, 5, 6, 7, 8)
+	for i := range r.InstanceMatrix {
+		r.InstanceMatrix[i][i+4] = NewInstance(r, uint8(i), uint64(i+4))
+		r.InstanceMatrix[i][i+4].status = committed
+	}
+	r.InstanceMatrix[0][4].deps = data.Dependencies{2, 0, 0, 0, 0}
+	r.InstanceMatrix[0][4].cmds = data.Commands{
+		data.Command("[0][4]"),
+		data.Command("[0][4]"),
+	}
+
+	r.InstanceMatrix[1][5].deps = data.Dependencies{0, 3, 0, 0, 0}
+	r.InstanceMatrix[1][5].cmds = data.Commands{
+		data.Command("[1][5]"),
+		data.Command("[1][5]"),
+	}
+
+	r.InstanceMatrix[2][6].deps = data.Dependencies{0, 0, 4, 0, 0}
+	r.InstanceMatrix[2][6].cmds = data.Commands{
+		data.Command("[2][6]"),
+		data.Command("[2][6]"),
+	}
+
+	r.InstanceMatrix[3][7].deps = data.Dependencies{0, 0, 0, 5, 0}
+	r.InstanceMatrix[3][7].cmds = data.Commands{
+		data.Command("[3][7]"),
+		data.Command("[3][7]"),
+	}
+
+	r.InstanceMatrix[4][8].deps = data.Dependencies{0, 0, 0, 0, 6}
+	r.InstanceMatrix[4][8].cmds = data.Commands{
+		data.Command("[4][8]"),
+		data.Command("[4][8]"),
+	}
+
+	// create 2nd level deps (2, 3, 4, 5, 6)
+	for i := range r.InstanceMatrix {
+		r.InstanceMatrix[i][i+2] = NewInstance(r, uint8(i), uint64(i+2))
+		r.InstanceMatrix[i][i+2].status = committed
+		r.InstanceMatrix[i][i+2].cmds = data.Commands{
+			data.Command(fmt.Sprintf("[%d][%d]", i, i+2)),
+			data.Command(fmt.Sprintf("[%d][%d]", i, i+2)),
+		}
+	}
+
+	// create a scc (2->4, 2->5, 3->4, 3->5)
+	r.InstanceMatrix[0][2].deps = data.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[1][3].deps = data.Dependencies{4, 5, 0, 0, 0}
+}
+
+// This func tests the result of executeList()
+func TestExecuteList(t *testing.T) {
+	r := commonTestlibExampleReplica()
+	r.StateMachine = test.NewDummySM()
+
+	makeCommitedInstances(r)
+	// resolve conflicts
+	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][6]))
+	assert.Nil(t, r.executeList())
+
+	// construct executionLog
+	expectLogStr := "["
+	expectLogStr += "[1][3] [1][3] "
+	expectLogStr += "[1][5] [1][5] "
+	expectLogStr += "[0][2] [0][2] "
+	expectLogStr += "[0][4] [0][4] "
+
+	for i := 2; i < int(r.Size); i++ {
+		expectLogStr += fmt.Sprintf("[%d][%d] [%d][%d] ", i, i+2, i, i+2)
+		expectLogStr += fmt.Sprintf("[%d][%d] [%d][%d] ", i, i+4, i, i+4)
+	}
+	expectLogStr += "[0][6] [0][6]]"
+
+	// test the execution result
+	executionLogStr := fmt.Sprint(r.StateMachine.(*test.DummySM).ExecutionLog)
+	assert.Equal(t, executionLogStr, expectLogStr)
+}
+
+// This func tests if executeList() will return error when there is
+// an error returned by the state machine
+func TestExecuteListWithError(t *testing.T) {
+	r := commonTestlibExampleReplica()
+	r.StateMachine = test.NewDummySM()
+	makeCommitedInstances(r)
+
+	// create an error
+	r.InstanceMatrix[0][6].cmds = data.Commands{
+		data.Command("error"),
+	}
+
+	// resolve conflicts
+	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][6]))
+
+	// should return an error
+	assert.Equal(t, r.executeList(), epaxos.ErrStateMachineExecution)
+
+	// construct executionLog
+	expectLogStr := "["
+	expectLogStr += "[1][3] [1][3] "
+	expectLogStr += "[1][5] [1][5] "
+	expectLogStr += "[0][2] [0][2] "
+	expectLogStr += "[0][4] [0][4] "
+
+	for i := 2; i < int(r.Size); i++ {
+		expectLogStr += fmt.Sprintf("[%d][%d] [%d][%d] ", i, i+2, i, i+2)
+		expectLogStr += fmt.Sprintf("[%d][%d] [%d][%d] ", i, i+4, i, i+4)
+	}
+	// replace the last white-space to `]`
+	expectLogStr = expectLogStr[0 : len(expectLogStr)-1]
+	expectLogStr += "]"
+
+	// test the exection result
+	executionLogStr := fmt.Sprint(r.StateMachine.(*test.DummySM).ExecutionLog)
+	assert.Equal(t, executionLogStr, expectLogStr)
 }

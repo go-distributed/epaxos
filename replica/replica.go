@@ -13,6 +13,7 @@ package replica
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,6 +22,10 @@ import (
 )
 
 var _ = fmt.Printf
+
+var (
+	errConflictsNotFullyResolved = errors.New("Conflicts not fully resolved")
+)
 
 // ****************************
 // *****  CONST ENUM **********
@@ -341,21 +346,30 @@ func (r *Replica) findAndExecute() {
 				r.ExecutedUpTo[i]++
 				continue
 			}
+			if err := r.execute(instance); err != nil {
+				switch err {
+				case errConflictsNotFullyResolved:
+					break
+				case epaxos.ErrStateMachineExecution:
+					panic("")
+					// TODO: log and warning
+					break
+				default:
+					panic("unexpected error")
 
-			if ok := r.execute(instance); !ok {
-				break
+				}
 			}
 		}
 	}
 }
 
 // NOTE: atomic
-func (r *Replica) execute(i *Instance) bool {
+func (r *Replica) execute(i *Instance) error {
 	r.sccStack.Init()
 	r.sccResult.Init()
 	r.sccIndex = 1
 	if ok := r.resolveConflicts(i); !ok {
-		return false
+		return errConflictsNotFullyResolved
 	}
 	// execute elements in the result list
 	// the list will maintain the order of nodes that:
@@ -363,19 +377,34 @@ func (r *Replica) execute(i *Instance) bool {
 	// - In the same component, nodes at higher instance space index locates
 	// - at smaller index.
 
-	r.executeList()
-	return true
+	if err := r.executeList(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // this should be a transaction.
-func (r *Replica) executeList() {
-	panic("")
+func (r *Replica) executeList() error {
+	for r.sccResult.Len() > 0 {
+		i := r.dequeueSccResult()
+		// [*] currently, not using result returned by state machine here
+		_, err := r.StateMachine.Execute(i.cmds)
+		if err != nil {
+			return err
+		}
+		i.SetExecuted()
+	}
+	return nil
 }
 
 // Assumption:
 // - If a node is executed, then all the strongly connected components it belongs to or
 // - lower than its has been executed. This is useful to reduce search space.
 func (r *Replica) resolveConflicts(node *Instance) bool {
+	if node == nil || !node.isAtStatus(committed) {
+		panic("")
+	}
+
 	node.sccIndex = r.sccIndex
 	node.sccLowlink = r.sccIndex
 	r.sccIndex++
@@ -388,7 +417,7 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 		}
 
 		neighbor := r.InstanceMatrix[iSpace][dep]
-		if neighbor.status != committed {
+		if !neighbor.isAtStatus(committed) {
 			return false
 		}
 
@@ -413,13 +442,12 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 	if node.sccLowlink == node.sccIndex {
 		for {
 			n := r.popSccStack()
-			r.pushSccResult(n)
+			r.enqueueSccResult(n)
 			if node == n {
 				break
 			}
 		}
 	}
-
 	return true
 }
 
@@ -427,7 +455,7 @@ func (r *Replica) pushSccStack(i *Instance) {
 	r.sccStack.PushBack(i)
 }
 
-func (r *Replica) pushSccResult(i *Instance) {
+func (r *Replica) enqueueSccResult(i *Instance) {
 	r.sccResult.PushBack(i)
 }
 
@@ -446,5 +474,11 @@ func (r *Replica) inSccStack(other *Instance) bool {
 func (r *Replica) popSccStack() *Instance {
 	res := r.sccStack.Back().Value.(*Instance)
 	r.sccStack.Remove(r.sccStack.Back())
+	return res
+}
+
+func (r *Replica) dequeueSccResult() *Instance {
+	res := r.sccResult.Front().Value.(*Instance)
+	r.sccResult.Remove(r.sccResult.Front())
 	return res
 }
