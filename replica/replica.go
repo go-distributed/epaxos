@@ -122,26 +122,22 @@ func (r *Replica) Start() {
 
 // handling events
 func (r *Replica) eventLoop() {
-	go func() {
-		for {
-			// TODO: check timeout
-			// add time.After for timeout checking
-			select {
-			case mevent := <-r.MessageEventChan:
-				r.dispatch(mevent)
-			}
+	for {
+		// TODO: check timeout
+		// add time.After for timeout checking
+		select {
+		case mevent := <-r.MessageEventChan:
+			r.dispatch(mevent)
 		}
-	}()
+	}
 }
 
 func (r *Replica) executeLoop() {
-	go func() {
-		for {
-			time.Sleep(executeInterval)
-			// execution of committed instances
-			r.findAndExecute()
-		}
-	}()
+	for {
+		time.Sleep(executeInterval)
+		// execution of committed instances
+		r.findAndExecute()
+	}
 }
 
 // TODO: This must be done in a synchronized/atomic way.
@@ -234,7 +230,8 @@ func (r *Replica) makeInitialDeps() data.Dependencies {
 	return make(data.Dependencies, r.Size)
 }
 
-// Thins func initiate a new instance, construct its commands and dependencies
+// This func initiate a new instance, construct its commands and dependencies
+// TODO: this operation should synchronized/atomic
 func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 	if i.rowId != r.Id {
 		panic("")
@@ -248,12 +245,11 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 
 		if curr == int(i.rowId) {
 			// set deps on its immediate precessor
-			conflict := uint64(i.id - 1)
-			deps[curr] = conflict
+			deps[curr] = uint64(i.id - 1)
 			continue
 		}
 
-		conflict, _ := r.scanConflicts(instances, cmds, start, conflictNotFound)
+		conflict := r.scanConflicts(instances, cmds, start, 0)
 		deps[curr] = conflict
 	}
 	i.cmds, i.deps = cmds, deps
@@ -279,7 +275,8 @@ func (r *Replica) updateInstance(cmds data.Commands, deps data.Dependencies, fro
 		instances := r.InstanceMatrix[curr]
 		start, end := r.MaxInstanceNum[curr], deps[curr]
 
-		if conflict, ok := r.scanConflicts(instances, cmds, start, end); ok {
+		conflict := r.scanConflicts(instances, cmds, start, end)
+		if deps[curr] < conflict {
 			changed = true
 			deps[curr] = conflict
 		}
@@ -298,21 +295,21 @@ func (r *Replica) IsCheckpoint(n uint64) bool {
 
 // scanConflicts scans the instances from start to end (high to low).
 // return the highest instance that has conflicts with passed in cmds.
-func (r *Replica) scanConflicts(instances []*Instance, cmds data.Commands, start uint64, end uint64) (uint64, bool) {
+func (r *Replica) scanConflicts(instances []*Instance, cmds data.Commands, start uint64, end uint64) uint64 {
 	for i := start; i > end; i-- {
 		if r.IsCheckpoint(i) {
-			return i, true
+			return i
 		}
 		if instances[i] == nil {
 			continue
 		}
 		// we only need to find the highest instance in conflict
 		if r.StateMachine.HaveConflicts(cmds, instances[i].cmds) {
-			return i, true
+			return i
 		}
 	}
 
-	return conflictNotFound, false
+	return end
 }
 
 func (r *Replica) updateMaxInstanceNum(rowId uint8, instanceId uint64) bool {
