@@ -151,28 +151,6 @@ func (i *Instance) Dependencies() data.Dependencies {
 	return i.deps
 }
 
-// This is used to check when handling preaccept-reply messages,
-// can this instance could still go to fast path
-//
-// we are not able to commit on past path if the following happens
-//
-// 1, not all replies are the same
-// 2, we are not in the initial round.
-//
-// And for condition 1, we have two cases:
-//
-// a, not all preAcceptReplies are the same
-// b, we have received both preAcceptReplies and preAcceptOks
-func (i *Instance) notAbleToFastPath() bool {
-	return !i.info.samePreAcceptReplies ||
-		!i.ballot.IsInitialBallot() ||
-		(i.info.preAcceptOkCount > 0 && i.info.preAcceptReplyCount > 0)
-}
-
-func (i *Instance) ableToFastPath() bool {
-	return !i.notAbleToFastPath()
-}
-
 func (i *InstanceInfo) reset() {
 	i.samePreAcceptReplies = true
 	i.preAcceptOkCount = 0
@@ -531,6 +509,28 @@ func (i *Instance) handlePreAccept(p *data.PreAccept) (action uint8, msg Message
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 	}
+}
+
+// This is used to check when handling preaccept-reply messages,
+// can this instance could still go to fast path
+//
+// we are not able to commit on past path if the following happens
+//
+// 1, not all replies are the same
+// 2, we are not in the initial round.
+//
+// And for condition 1, we have two cases:
+//
+// a, not all preAcceptReplies are the same
+// b, we have received both preAcceptReplies and preAcceptOks
+func (i *Instance) notAbleToFastPath() bool {
+	return !i.info.samePreAcceptReplies ||
+		!i.ballot.IsInitialBallot() ||
+		(i.info.preAcceptOkCount > 0 && i.info.preAcceptReplyCount > 0)
+}
+
+func (i *Instance) ableToFastPath() bool {
+	return !i.notAbleToFastPath()
 }
 
 // common routine for judging next step for handle preaccept-ok and -reply
@@ -1044,7 +1044,7 @@ func (i *Instance) checkStatus(statusList ...uint8) {
 	}
 }
 
-func (i *Instance) Executed() bool {
+func (i *Instance) isExecuted() bool {
 	return i.executed
 }
 

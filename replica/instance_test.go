@@ -3011,7 +3011,7 @@ func TestCheckStatus(t *testing.T) {
 
 func TestExecuted(t *testing.T) {
 	i := &Instance{}
-	assert.False(t, i.Executed())
+	assert.False(t, i.isExecuted())
 	i.SetExecuted()
-	assert.True(t, i.Executed())
+	assert.True(t, i.isExecuted())
 }

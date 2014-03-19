@@ -65,7 +65,7 @@ func Test3ReplicaReplication(t *testing.T) {
 	maxInstance := 1024 * 48
 
 	for i := 0; i < maxInstance; i++ {
-		nodes[0].Propose(cmds)
+		nodes[0].BatchPropose(cmds)
 	}
 
 	time.Sleep(1000 * time.Millisecond)
@@ -88,8 +88,8 @@ func Test3ReplicaConflict(t *testing.T) {
 	maxInstance := 1024 * 48
 
 	for i := 0; i < maxInstance; i++ {
-		nodes[0].Propose(cfCmds[0])
-		nodes[2].Propose(cfCmds[1])
+		nodes[0].BatchPropose(cfCmds[0])
+		nodes[2].BatchPropose(cfCmds[1])
 	}
 
 	time.Sleep(1000 * time.Millisecond)
