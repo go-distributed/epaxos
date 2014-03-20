@@ -15,6 +15,7 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/go-distributed/epaxos"
@@ -65,9 +66,9 @@ type Replica struct {
 	Transporter
 
 	// tarjan SCC
-	sccStack  *list.List
-	sccResult *list.List
-	sccIndex  int
+	sccStack   *list.List
+	sccResults [][]*Instance
+	sccIndex   int
 }
 
 type Param struct {
@@ -108,7 +109,6 @@ func New(param *Param) (r *Replica) {
 		Epoch:            epochStart,
 		MessageEventChan: make(chan *MessageEvent),
 		sccStack:         list.New(),
-		sccResult:        list.New(),
 	}
 
 	for i := uint8(0); i < size; i++ {
@@ -396,7 +396,7 @@ func (r *Replica) findAndExecute() {
 // NOTE: atomic
 func (r *Replica) execute(i *Instance) error {
 	r.sccStack.Init()
-	r.sccResult.Init()
+	r.sccResults = make([][]*Instance, 0)
 	r.sccIndex = 1
 	if ok := r.resolveConflicts(i); !ok {
 		return errConflictsNotFullyResolved
@@ -414,19 +414,29 @@ func (r *Replica) execute(i *Instance) error {
 
 // this should be a transaction.
 func (r *Replica) executeList() error {
-	for r.sccResult.Len() > 0 {
-		i := r.dequeueSccResult()
-		// [*] currently, not using result returned by state machine here
-		_, err := r.StateMachine.Execute(i.cmds)
+	cmdsBuffer := make([]data.Command, 0)
+
+	// batch all commands in the scc
+	for _, sccNodes := range r.sccResults {
+		cmdsBuffer = cmdsBuffer[:0]
+		for _, instance := range sccNodes {
+			cmdsBuffer = append(cmdsBuffer, instance.cmds...)
+		}
+		// return results from state machine are not being used currently
+
+		_, err := r.StateMachine.Execute(cmdsBuffer)
 		if err != nil {
 			return err
 		}
-		i.SetExecuted()
+		// TODO: transaction one SCC
+		for _, instance := range sccNodes {
+			instance.SetExecuted()
+		}
 	}
 	return nil
 }
 
-// Assumption:
+// Assumption this function is based on:
 // - If a node is executed, all SCC it belongs to or depending has been executed.
 func (r *Replica) resolveConflicts(node *Instance) bool {
 	if node == nil || !node.isAtStatus(committed) {
@@ -440,7 +450,7 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 	r.pushSccStack(node)
 	for iSpace := 0; iSpace < int(r.Size); iSpace++ {
 		dep := node.deps[iSpace]
-		if dep == conflictNotFound || r.IsCheckpoint(dep) {
+		if r.IsCheckpoint(dep) {
 			continue
 		}
 
@@ -467,14 +477,18 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 		}
 	}
 
+	// found one SCC
 	if node.sccLowlink == node.sccIndex {
+		singleScc := make(sccNodesQueue, 0)
 		for {
 			n := r.popSccStack()
-			r.enqueueSccResult(n)
+			singleScc = append(singleScc, n)
 			if node == n {
 				break
 			}
 		}
+		sort.Sort(singleScc)
+		r.sccResults = append(r.sccResults, singleScc)
 	}
 	return true
 }
@@ -483,10 +497,7 @@ func (r *Replica) pushSccStack(i *Instance) {
 	r.sccStack.PushBack(i)
 }
 
-func (r *Replica) enqueueSccResult(i *Instance) {
-	r.sccResult.PushBack(i)
-}
-
+// TODO: this could be optimized in O(1) with marking flag.
 func (r *Replica) inSccStack(other *Instance) bool {
 	iter := r.sccStack.Front()
 	for iter != nil {
@@ -505,8 +516,23 @@ func (r *Replica) popSccStack() *Instance {
 	return res
 }
 
-func (r *Replica) dequeueSccResult() *Instance {
-	res := r.sccResult.Front().Value.(*Instance)
-	r.sccResult.Remove(r.sccResult.Front())
-	return res
+// interfaces for sorting sccResult
+// sort by
+// 1, rowId,
+// 2, id,
+// so, i < j if and only if
+// - i.rowId < j.rowId or,
+// - i.rowId == j.rowId && i.id < j.id
+type sccNodesQueue []*Instance
+
+func (s sccNodesQueue) Len() int      { return len(s) }
+func (s sccNodesQueue) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+func (s sccNodesQueue) Less(i, j int) bool {
+	if s[i].rowId < s[j].rowId {
+		return true
+	}
+	if s[i].rowId == s[j].rowId {
+		return s[i].id < s[j].id
+	}
+	return false
 }
