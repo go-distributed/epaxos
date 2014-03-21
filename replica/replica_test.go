@@ -146,8 +146,13 @@ func TestResolveConflictsWithNoDeps(t *testing.T) {
 
 	r.InstanceMatrix[0][1].status = committed
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][1]))
-	assert.Equal(t, r.sccResult.Len(), 1)
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][1])
+
+	sccResultInstances := make([]*Instance, 0)
+	for _, instances := range r.sccResults {
+		sccResultInstances = append(sccResultInstances, instances...)
+	}
+	assert.Equal(t, len(sccResultInstances), 1)
+	assert.Equal(t, sccResultInstances[0], r.InstanceMatrix[0][1])
 }
 
 // **************************************
@@ -164,12 +169,18 @@ func TestResolveConflictsWithSimpleDeps(t *testing.T) {
 	r.InstanceMatrix[0][3].status = committed
 
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][3]))
-	assert.Equal(t, r.sccResult.Len(), 6)
 
-	for i := range r.InstanceMatrix {
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+2])
+	sccResultInstances := make([]*Instance, 0)
+	for _, instances := range r.sccResults {
+		sccResultInstances = append(sccResultInstances, instances...)
 	}
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][3])
+	assert.Equal(t, len(sccResultInstances), 6)
+	i := 0
+	for i = range r.InstanceMatrix {
+		assert.Equal(t, sccResultInstances[i], r.InstanceMatrix[i][i+2])
+	}
+	i++
+	assert.Equal(t, sccResultInstances[i], r.InstanceMatrix[0][3])
 }
 
 // ***************************************************************
@@ -208,14 +219,21 @@ func TestResolveConflictsWithMultipleLevelDeps(t *testing.T) {
 	}
 
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][6]))
-	assert.Equal(t, r.sccResult.Len(), 11)
 
 	// test result list
-	for i := range r.InstanceMatrix {
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+2])
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+4])
+	sccResultInstances := make([]*Instance, 0)
+	for _, instances := range r.sccResults {
+		sccResultInstances = append(sccResultInstances, instances...)
 	}
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][6])
+	assert.Equal(t, len(sccResultInstances), 11)
+	j := 0
+	for i := range r.InstanceMatrix {
+		assert.Equal(t, sccResultInstances[j], r.InstanceMatrix[i][i+2])
+		j++
+		assert.Equal(t, sccResultInstances[j], r.InstanceMatrix[i][i+4])
+		j++
+	}
+	assert.Equal(t, sccResultInstances[j], r.InstanceMatrix[0][6])
 }
 
 // ******************************************************************
@@ -261,21 +279,30 @@ func TestResolveConflictsWithSccDeps(t *testing.T) {
 	r.InstanceMatrix[1][3].deps = data.Dependencies{4, 5, 0, 0, 0}
 
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][6]))
-	assert.Equal(t, r.sccResult.Len(), 11)
 
 	// test result list
 	// scc components
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[1][3])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[1][5])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][2])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][4])
+	sccResultInstances := make([]*Instance, 0)
+	for _, instances := range r.sccResults {
+		sccResultInstances = append(sccResultInstances, instances...)
+	}
+	assert.Equal(t, len(sccResultInstances), 11)
+
+	assert.Equal(t, sccResultInstances[0], r.InstanceMatrix[0][2])
+	assert.Equal(t, sccResultInstances[1], r.InstanceMatrix[0][4])
+	assert.Equal(t, sccResultInstances[2], r.InstanceMatrix[1][3])
+	assert.Equal(t, sccResultInstances[3], r.InstanceMatrix[1][5])
 
 	// other nodes
-	for i := 2; i < int(r.Size); i++ {
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+2])
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+4])
-	}
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][6])
+	assert.Equal(t, sccResultInstances[4], r.InstanceMatrix[2][4])
+	assert.Equal(t, sccResultInstances[5], r.InstanceMatrix[2][6])
+	assert.Equal(t, sccResultInstances[6], r.InstanceMatrix[3][5])
+	assert.Equal(t, sccResultInstances[7], r.InstanceMatrix[3][7])
+	assert.Equal(t, sccResultInstances[8], r.InstanceMatrix[4][6])
+	assert.Equal(t, sccResultInstances[9], r.InstanceMatrix[4][8])
+
+	// last node
+	assert.Equal(t, sccResultInstances[10], r.InstanceMatrix[0][6])
 }
 
 // ***************************************************************************************
@@ -312,20 +339,24 @@ func TestResolveConflictsWithSccDepsAndUncommitedInstance(t *testing.T) {
 	r.InstanceMatrix[4][6].status = accepted
 
 	assert.False(t, r.resolveConflicts(r.InstanceMatrix[0][6]))
-	assert.Equal(t, r.sccResult.Len(), 8)
 
 	// test result list
 	// scc components
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[1][3])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[1][5])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][2])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][4])
+	sccResultInstances := make([]*Instance, 0)
+	for _, instances := range r.sccResults {
+		sccResultInstances = append(sccResultInstances, instances...)
+	}
+	assert.Equal(t, len(sccResultInstances), 8)
+	assert.Equal(t, sccResultInstances[0], r.InstanceMatrix[0][2])
+	assert.Equal(t, sccResultInstances[1], r.InstanceMatrix[0][4])
+	assert.Equal(t, sccResultInstances[2], r.InstanceMatrix[1][3])
+	assert.Equal(t, sccResultInstances[3], r.InstanceMatrix[1][5])
 
 	// other nodes
-	for i := 2; i < int(r.Size)-1; i++ {
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+2])
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+4])
-	}
+	assert.Equal(t, sccResultInstances[4], r.InstanceMatrix[2][4])
+	assert.Equal(t, sccResultInstances[5], r.InstanceMatrix[2][6])
+	assert.Equal(t, sccResultInstances[6], r.InstanceMatrix[3][5])
+	assert.Equal(t, sccResultInstances[7], r.InstanceMatrix[3][7])
 }
 
 // ************************************************************************************
@@ -363,21 +394,27 @@ func TestResolveConflictsWithSccDepsAndexecutedInstance(t *testing.T) {
 	r.InstanceMatrix[4][8].SetExecuted()
 
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][6]))
-	assert.Equal(t, r.sccResult.Len(), 9)
 
 	// test result list
 	// scc components
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[1][3])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[1][5])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][2])
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][4])
+	sccResultInstances := make([]*Instance, 0)
+	for _, instances := range r.sccResults {
+		sccResultInstances = append(sccResultInstances, instances...)
+	}
+	assert.Equal(t, len(sccResultInstances), 9)
+	assert.Equal(t, sccResultInstances[0], r.InstanceMatrix[0][2])
+	assert.Equal(t, sccResultInstances[1], r.InstanceMatrix[0][4])
+	assert.Equal(t, sccResultInstances[2], r.InstanceMatrix[1][3])
+	assert.Equal(t, sccResultInstances[3], r.InstanceMatrix[1][5])
 
 	// other nodes
-	for i := 2; i < int(r.Size)-1; i++ {
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+2])
-		assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[i][i+4])
-	}
-	assert.Equal(t, r.sccResult.Remove(r.sccResult.Front()), r.InstanceMatrix[0][6])
+	assert.Equal(t, sccResultInstances[4], r.InstanceMatrix[2][4])
+	assert.Equal(t, sccResultInstances[5], r.InstanceMatrix[2][6])
+	assert.Equal(t, sccResultInstances[6], r.InstanceMatrix[3][5])
+	assert.Equal(t, sccResultInstances[7], r.InstanceMatrix[3][7])
+
+	// last nodes
+	assert.Equal(t, sccResultInstances[8], r.InstanceMatrix[0][6])
 }
 
 // a helper to make committed instances, containing scc, no un-committed, nor executed instances
@@ -452,15 +489,16 @@ func TestExecuteList(t *testing.T) {
 
 	// construct executionLog
 	expectLogStr := "["
-	expectLogStr += "[1][3] [1][3] "
-	expectLogStr += "[1][5] [1][5] "
 	expectLogStr += "[0][2] [0][2] "
 	expectLogStr += "[0][4] [0][4] "
+	expectLogStr += "[1][3] [1][3] "
+	expectLogStr += "[1][5] [1][5] "
 
 	for i := 2; i < int(r.Size); i++ {
 		expectLogStr += fmt.Sprintf("[%d][%d] [%d][%d] ", i, i+2, i, i+2)
 		expectLogStr += fmt.Sprintf("[%d][%d] [%d][%d] ", i, i+4, i, i+4)
 	}
+	// replace the last white-space to `]`
 	expectLogStr += "[0][6] [0][6]]"
 
 	// test the execution result
@@ -488,17 +526,15 @@ func TestExecuteListWithError(t *testing.T) {
 
 	// construct executionLog
 	expectLogStr := "["
-	expectLogStr += "[1][3] [1][3] "
-	expectLogStr += "[1][5] [1][5] "
 	expectLogStr += "[0][2] [0][2] "
 	expectLogStr += "[0][4] [0][4] "
-
+	expectLogStr += "[1][3] [1][3] "
+	expectLogStr += "[1][5] [1][5] "
 	for i := 2; i < int(r.Size); i++ {
 		expectLogStr += fmt.Sprintf("[%d][%d] [%d][%d] ", i, i+2, i, i+2)
 		expectLogStr += fmt.Sprintf("[%d][%d] [%d][%d] ", i, i+4, i, i+4)
 	}
-	// replace the last white-space to `]`
-	expectLogStr = expectLogStr[0 : len(expectLogStr)-1]
+	expectLogStr = expectLogStr[:len(expectLogStr)-1]
 	expectLogStr += "]"
 
 	// test the exection result
