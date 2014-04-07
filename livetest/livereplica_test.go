@@ -2,6 +2,7 @@ package livetest
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -58,6 +59,58 @@ func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 	return nodes
 }
 
+// This function tests the equality of two replicas'log
+// for Instance[row]
+func livetestlibLogCmpForTwo(t *testing.T, a, b *replica.Replica, row int) bool {
+	if a.Size != b.Size {
+		t.Fatal("Replica size not equal, this shouldn't happen")
+	}
+
+	var end uint64
+	if a.MaxInstanceNum[row] > b.MaxInstanceNum[row] {
+		end = a.MaxInstanceNum[row]
+	} else {
+		end = b.MaxInstanceNum[row]
+	}
+	for i := 0; i < int(end); i++ {
+		if a.IsCheckpoint(uint64(i)) {
+			continue
+		}
+		if !reflect.DeepEqual(
+			a.InstanceMatrix[row][i].Commands(),
+			b.InstanceMatrix[row][i].Commands()) {
+			t.Logf("Cmds are not equal for replica[%d]:Instance[%d][%d] and replica[%d]:Instance[%d][%d]\n",
+				a.Id, row, i, b.Id, row, i)
+			return false
+		}
+		if !reflect.DeepEqual(
+			a.InstanceMatrix[row][i].Dependencies(),
+			b.InstanceMatrix[row][i].Dependencies()) {
+			t.Logf("Deps are not equal for replica[%d]:Instance[%d][%d] and replica[%d]:Instance[%d][%d]\n",
+				a.Id, row, i, b.Id, row, i)
+			return false
+		}
+	}
+	return true
+}
+
+// This is a Log comparation helper function, call this to check the log consistency.
+// This func will return true if all logs(commands and dependencies) among a group of replicas
+// are identical.
+func livetestlibLogConsistent(t *testing.T, replicas ...*replica.Replica) bool {
+	size := int(replicas[0].Size)
+
+	for i := range replicas {
+		next := (i + 1) % size
+		for j := 0; j < size; j++ {
+			if !livetestlibLogCmpForTwo(t, replicas[i], replicas[next], j) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Test Scenario: Non-conflict commands, 1 proposer
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica1ProposerNoConflict(t *testing.T) {
@@ -73,19 +126,8 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 	}
 	time.Sleep(1000 * time.Millisecond)
 
-	// test log correctness
-	for i := 1; i <= maxInstance; i++ {
-		for _, r := range nodes {
-			if r.IsCheckpoint(uint64(i)) {
-				break
-			}
-			logIndex := i - 1 - i/int(r.CheckpointCycle)
-			assert.NotNil(t, r.InstanceMatrix[0][i])
-			assert.Equal(t, r.InstanceMatrix[0][i].Commands(), allCmds[logIndex])
-			expectedDeps := data.Dependencies{uint64(i - 1), 0, 0}
-			assert.Equal(t, r.InstanceMatrix[0][i].Dependencies(), expectedDeps)
-		}
-	}
+	// test log consistency
+	assert.True(t, livetestlibLogConsistent(t, nodes...))
 }
 
 // Test Scenario: Non-conflict commands, 3 proposers
@@ -113,26 +155,8 @@ func Test3Replica3ProposerNoConflict(t *testing.T) {
 	}
 	time.Sleep(1000 * time.Microsecond)
 
-	// test log correctness
-	for i := 1; i <= maxInstance; i++ {
-		// test over all instances
-		for _, r := range nodes {
-			if r.IsCheckpoint(uint64(i)) {
-				break
-			}
-			// test over all log spaces of one instance
-			for j := 0; j < N; j++ {
-				// test commands
-				logIndex := i - 1 - i/int(r.CheckpointCycle)
-				assert.NotNil(t, r.InstanceMatrix[j][i])
-				assert.Equal(t, r.InstanceMatrix[j][i].Commands(), allCmdsGroup[j][logIndex])
-
-				// test depencies,
-				// TODO: only partitial dependency now
-				assert.Equal(t, r.InstanceMatrix[j][i].Dependencies()[j], uint64(i-1))
-			}
-		}
-	}
+	// test log consistency
+	assert.True(t, livetestlibLogConsistent(t, nodes...))
 }
 
 //func Test3ReplicaConflict(t *testing.T) {
