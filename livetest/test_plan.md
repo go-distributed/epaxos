@@ -1,20 +1,20 @@
 ## Test Plan
 ### Basic Test (3 replicas)
 
-* Non-conflict commands, 1 proposer **(Pass)**
- * Expect: All replicas have same correct logs(cmds, seq, deps) eventually
+* Non-conflict commands, 1 proposer **(PASS)**
+ * Expect: All replicas have same correct logs(cmds, deps) eventually
 
-* Non-conflict commands, 3 proposers
+* Non-conflict commands, 3 proposers **(PASS)**
 
- * Expect: All replicas have same correct logs(cmds, seq, deps) eventually
+ * Expect: All replicas have same correct logs(cmds, deps) eventually
 
-* Conflict commands, 1 proposer **(Half Pass)**
+* Conflict commands, 1 proposer **(TODO)**
 
- * Expect: All replicas have same correct logs(cmds, seq, deps) eventually
+ * Expect: All replicas have same correct logs(cmds, deps) eventually
 
 * Conflict commands, 3 proposers
 
- * Expect: All replicas have same correct logs(cmds, seq, deps) eventually
+ * Expect: All replicas have same correct logs(cmds, deps) eventually
 
 ### Basic Robust Test (3 replicas)
 
