@@ -16,9 +16,9 @@ import (
 var _ = fmt.Printf
 var _ = assert.Equal
 
-func livetestlibExampleCommands() data.Commands {
+func livetestlibExampleCommands(i int) data.Commands {
 	return data.Commands{
-		data.Command("hello"),
+		data.Command(strconv.Itoa(i)),
 	}
 }
 
@@ -58,41 +58,95 @@ func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 	return nodes
 }
 
-func Test3ReplicaReplication(t *testing.T) {
-	cmds := livetestlibExampleCommands()
+// Test Scenario: Non-conflict commands, 1 proposer
+// Expect: All replicas have same correct logs(cmds, deps) eventually
+func Test3Replica1ProposerNoConflict(t *testing.T) {
+	maxInstance := 1024 * 48
+	allCmds := make([]data.Commands, maxInstance)
+
 	nodes := livetestlibSetupCluster(3)
 
-	maxInstance := 1024 * 48
-
 	for i := 0; i < maxInstance; i++ {
+		cmds := livetestlibExampleCommands(i)
 		nodes[0].BatchPropose(cmds)
+		allCmds[i] = cmds
 	}
-
 	time.Sleep(1000 * time.Millisecond)
 
+	// test log correctness
 	for i := 1; i <= maxInstance; i++ {
 		for _, r := range nodes {
 			if r.IsCheckpoint(uint64(i)) {
 				break
 			}
+			logIndex := i - 1 - i/int(r.CheckpointCycle)
 			assert.NotNil(t, r.InstanceMatrix[0][i])
-			assert.Equal(t, r.InstanceMatrix[0][i].Commands(), cmds)
+			assert.Equal(t, r.InstanceMatrix[0][i].Commands(), allCmds[logIndex])
+			expectedDeps := data.Dependencies{uint64(i - 1), 0, 0}
+			assert.Equal(t, r.InstanceMatrix[0][i].Dependencies(), expectedDeps)
 		}
 	}
 }
 
-func Test3ReplicaConflict(t *testing.T) {
-	cfCmds := livetestlibConflictedCommands(2)
-	nodes := livetestlibSetupCluster(3)
+// Test Scenario: Non-conflict commands, 3 proposers
+// Expect: All replicas have same correct logs(cmds, deps) eventually
+func Test3Replica3ProposerNoConflict(t *testing.T) {
+	N := 3
+	maxInstance := 1024 * 48 // why this?
+	allCmdsGroup := make([][]data.Commands, N)
+	nodes := livetestlibSetupCluster(N)
 
-	maxInstance := 1024 * 48
-
-	for i := 0; i < maxInstance; i++ {
-		nodes[0].BatchPropose(cfCmds[0])
-		nodes[2].BatchPropose(cfCmds[1])
+	// setup expected logs
+	for i := range allCmdsGroup {
+		allCmdsGroup[i] = make([]data.Commands, maxInstance)
 	}
 
-	time.Sleep(1000 * time.Millisecond)
+	for i := 0; i < maxInstance; i++ {
+		for j := range nodes {
+			index := i*N + j
+			cmds := livetestlibExampleCommands(index)
+			nodes[j].BatchPropose(cmds)
 
-	// check
+			// record the correct log
+			allCmdsGroup[j][i] = cmds
+		}
+	}
+	time.Sleep(1000 * time.Microsecond)
+
+	// test log correctness
+	for i := 1; i <= maxInstance; i++ {
+		// test over all instances
+		for _, r := range nodes {
+			if r.IsCheckpoint(uint64(i)) {
+				break
+			}
+			// test over all log spaces of one instance
+			for j := 0; j < N; j++ {
+				// test commands
+				logIndex := i - 1 - i/int(r.CheckpointCycle)
+				assert.NotNil(t, r.InstanceMatrix[j][i])
+				assert.Equal(t, r.InstanceMatrix[j][i].Commands(), allCmdsGroup[j][logIndex])
+
+				// test depencies,
+				// TODO: only partitial dependency now
+				assert.Equal(t, r.InstanceMatrix[j][i].Dependencies()[j], uint64(i-1))
+			}
+		}
+	}
 }
+
+//func Test3ReplicaConflict(t *testing.T) {
+//	cfCmds := livetestlibConflictedCommands(2)
+//	nodes := livetestlibSetupCluster(3)
+//
+//	maxInstance := 1024 * 48
+//
+//	for i := 0; i < maxInstance; i++ {
+//		nodes[0].BatchPropose(cfCmds[0])
+//		nodes[2].BatchPropose(cfCmds[1])
+//	}
+//
+//	time.Sleep(1000 * time.Millisecond)
+//
+//	// check
+//}
