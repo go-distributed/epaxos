@@ -1,5 +1,9 @@
 package data
 
+import (
+	"fmt"
+)
+
 type Prepare struct {
 	ReplicaId  uint8
 	InstanceId uint64
@@ -27,14 +31,6 @@ func (p *Prepare) Content() interface{} {
 	return p
 }
 
-func (p *PrepareReply) Type() uint8 {
-	return PrepareReplyMsg
-}
-
-func (p *PrepareReply) Content() interface{} {
-	return p
-}
-
 func (p *Prepare) Replica() uint8 {
 	return p.ReplicaId
 }
@@ -43,10 +39,26 @@ func (p *Prepare) Instance() uint64 {
 	return p.InstanceId
 }
 
+func (p *Prepare) String() string {
+	return fmt.Sprintf("Prepare, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
+}
+
+func (p *PrepareReply) Type() uint8 {
+	return PrepareReplyMsg
+}
+
+func (p *PrepareReply) Content() interface{} {
+	return p
+}
+
 func (p *PrepareReply) Replica() uint8 {
 	return p.ReplicaId
 }
 
 func (p *PrepareReply) Instance() uint64 {
 	return p.InstanceId
+}
+
+func (p *PrepareReply) String() string {
+	return fmt.Sprintf("PrepareReply, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
 }

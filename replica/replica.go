@@ -18,11 +18,15 @@ import (
 	"sort"
 	"time"
 
+	"github.com/golang/glog"
+
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/data"
 )
 
 var _ = fmt.Printf
+
+var v1Log = glog.V(0)
 
 var (
 	errConflictsNotFullyResolved = errors.New("Conflicts not fully resolved")
@@ -200,6 +204,9 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 	replicaId := eventMsg.Replica()
 	instanceId := eventMsg.Instance()
 
+	v1Log.Infof("Replica[%v]: recv message[%s], from Replica[%v]\n",
+		r.Id, eventMsg.String(), mevent.From)
+
 	if instanceId <= conflictNotFound {
 		panic("")
 	}
@@ -211,6 +218,9 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 	i := r.InstanceMatrix[replicaId][instanceId]
 	var action uint8
 	var msg Message
+
+	v1Log.Infof("Replica[%v]: instance[%v][%v] status before = %v\n",
+		r.Id, replicaId, instanceId, i.StatusString())
 
 	switch i.status {
 	case nilStatus:
@@ -225,18 +235,31 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 		panic("")
 	}
 
+	if i.isAtStatus(committed) && action == noAction {
+		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v\n\n",
+			r.Id, replicaId, instanceId, i.StatusString())
+	} else {
+		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v\n",
+			r.Id, replicaId, instanceId, i.StatusString())
+	}
+
 	switch action {
 	case noAction:
 		return
 	case replyAction:
+		v1Log.Infof("Replica[%v]: send message[%s], to Replica[%v]\n\n",
+			r.Id, msg.String(), mevent.From)
 		r.Transporter.Send(mevent.From, msg)
 	case fastQuorumAction:
+		v1Log.Infof("Replica[%v]: send message[%s], to FastQuorum\n\n",
+			r.Id, msg.String(), mevent.From)
 		r.Transporter.MulticastFastquorum(msg)
 	case broadcastAction:
+		v1Log.Infof("Replica[%v]: send message[%s], to Everyone\n\n",
+			r.Id, msg.String(), mevent.From)
 		r.Transporter.Broadcast(msg)
 	default:
 		panic("")
-
 	}
 }
 

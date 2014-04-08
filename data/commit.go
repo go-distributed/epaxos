@@ -1,5 +1,9 @@
 package data
 
+import (
+	"fmt"
+)
+
 type Commit struct {
 	ReplicaId  uint8
 	InstanceId uint64
@@ -21,4 +25,8 @@ func (c *Commit) Replica() uint8 {
 
 func (c *Commit) Instance() uint64 {
 	return c.InstanceId
+}
+
+func (c *Commit) String() string {
+	return fmt.Sprintf("Commit, Instance[%v][%v]", c.ReplicaId, c.InstanceId)
 }

@@ -1051,3 +1051,18 @@ func (i *Instance) isExecuted() bool {
 func (i *Instance) SetExecuted() {
 	i.executed = true
 }
+
+func (i *Instance) StatusString() string {
+	switch i.status {
+	case nilStatus:
+		return "NilStatus"
+	case preAccepted:
+		return "PreAccepted"
+	case accepted:
+		return "Accepted"
+	case committed:
+		return "Committed"
+	default:
+		panic("")
+	}
+}
