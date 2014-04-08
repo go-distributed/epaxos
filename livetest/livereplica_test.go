@@ -145,7 +145,6 @@ func Test3Replica3ProposerNoConflict(t *testing.T) {
 	}
 	time.Sleep(100 * time.Microsecond)
 
-	// test log consistency
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 }
 
@@ -161,6 +160,8 @@ func Test2ProposerConflict(t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Microsecond)
+
+	assert.True(t, livetestlibLogConsistent(t, nodes...))
 
 	for i := 1; i < maxInstance; i++ {
 		deps1 := nodes[0].InstanceMatrix[0][i].Dependencies()
