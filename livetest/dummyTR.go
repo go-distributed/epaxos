@@ -19,8 +19,14 @@ func (tr *DummyTransporter) Send(to uint8, msg replica.Message) {
 }
 
 func (tr *DummyTransporter) MulticastFastquorum(msg replica.Message) {
+	skip := 0
 	for i := 0; i < int(tr.FastQuorum); i++ {
-		rid := (int(tr.Self) + 1 + i) % int(tr.All)
+		rid := uint8(i + skip)
+		if rid == tr.Self {
+			rid++
+			skip = 1
+		}
+
 		tr.Send(uint8(rid), msg)
 	}
 }
