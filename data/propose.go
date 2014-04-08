@@ -1,5 +1,9 @@
 package data
 
+import (
+	"fmt"
+)
+
 type Propose struct {
 	ReplicaId  uint8
 	InstanceId uint64
@@ -19,4 +23,8 @@ func (p *Propose) Replica() uint8 {
 
 func (p *Propose) Instance() uint64 {
 	return p.InstanceId
+}
+
+func (p *Propose) String() string {
+	return fmt.Sprintf("Propose, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
 }

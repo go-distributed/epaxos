@@ -1,5 +1,9 @@
 package data
 
+import (
+	"fmt"
+)
+
 type Accept struct {
 	ReplicaId  uint8
 	InstanceId uint64
@@ -23,14 +27,6 @@ func (a *Accept) Content() interface{} {
 	return a
 }
 
-func (a *AcceptReply) Type() uint8 {
-	return AcceptReplyMsg
-}
-
-func (a *AcceptReply) Content() interface{} {
-	return a
-}
-
 func (p *Accept) Replica() uint8 {
 	return p.ReplicaId
 }
@@ -39,10 +35,26 @@ func (p *Accept) Instance() uint64 {
 	return p.InstanceId
 }
 
+func (p *Accept) String() string {
+	return fmt.Sprintf("Accept, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
+}
+
+func (a *AcceptReply) Type() uint8 {
+	return AcceptReplyMsg
+}
+
+func (a *AcceptReply) Content() interface{} {
+	return a
+}
+
 func (p *AcceptReply) Replica() uint8 {
 	return p.ReplicaId
 }
 
 func (p *AcceptReply) Instance() uint64 {
 	return p.InstanceId
+}
+
+func (p *AcceptReply) String() string {
+	return fmt.Sprintf("AcceptReply, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
 }
