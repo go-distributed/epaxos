@@ -122,7 +122,7 @@ func New(param *Param) (r *Replica) {
 // Start running the replica. It shouldn't stop at any time.
 func (r *Replica) Start() {
 	go r.eventLoop()
-	go r.executeLoop()
+	//go r.executeLoop()
 	go r.proposeLoop()
 }
 

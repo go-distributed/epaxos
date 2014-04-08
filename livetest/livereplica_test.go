@@ -26,10 +26,10 @@ func livetestlibExampleCommands(i int) data.Commands {
 func livetestlibConflictedCommands(total int) (res []data.Commands) {
 	res = make([]data.Commands, total)
 	for i := 0; i < total; i++ {
-		res[i] = (data.Commands{
+		res[i] = data.Commands{
 			data.Command("c"),
 			data.Command(strconv.Itoa(i)),
-		})
+		}
 	}
 	return
 }
@@ -66,12 +66,11 @@ func livetestlibLogCmpForTwo(t *testing.T, a, b *replica.Replica, row int) bool 
 		t.Fatal("Replica size not equal, this shouldn't happen")
 	}
 
-	var end uint64
+	end := b.MaxInstanceNum[row]
 	if a.MaxInstanceNum[row] > b.MaxInstanceNum[row] {
 		end = a.MaxInstanceNum[row]
-	} else {
-		end = b.MaxInstanceNum[row]
 	}
+
 	for i := 0; i < int(end); i++ {
 		if a.IsCheckpoint(uint64(i)) {
 			continue
@@ -134,43 +133,42 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica3ProposerNoConflict(t *testing.T) {
 	N := 3
-	maxInstance := 1024 * 48 // why this?
-	allCmdsGroup := make([][]data.Commands, N)
+	maxInstance := 1024 * 4
 	nodes := livetestlibSetupCluster(N)
-
-	// setup expected logs
-	for i := range allCmdsGroup {
-		allCmdsGroup[i] = make([]data.Commands, maxInstance)
-	}
 
 	for i := 0; i < maxInstance; i++ {
 		for j := range nodes {
 			index := i*N + j
 			cmds := livetestlibExampleCommands(index)
 			nodes[j].BatchPropose(cmds)
-
-			// record the correct log
-			allCmdsGroup[j][i] = cmds
 		}
 	}
-	time.Sleep(1000 * time.Microsecond)
+	time.Sleep(100 * time.Microsecond)
 
 	// test log consistency
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 }
 
-//func Test3ReplicaConflict(t *testing.T) {
-//	cfCmds := livetestlibConflictedCommands(2)
-//	nodes := livetestlibSetupCluster(3)
-//
-//	maxInstance := 1024 * 48
-//
-//	for i := 0; i < maxInstance; i++ {
-//		nodes[0].BatchPropose(cfCmds[0])
-//		nodes[2].BatchPropose(cfCmds[1])
-//	}
-//
-//	time.Sleep(1000 * time.Millisecond)
-//
-//	// check
-//}
+func Test2ProposerConflict(t *testing.T) {
+	maxInstance := 1024
+	nodes := livetestlibSetupCluster(3)
+
+	for i := 1; i < maxInstance; i++ {
+		for j := 0; j < 2; j++ {
+			cmds := livetestlibExampleCommands(i)
+			nodes[j].BatchPropose(cmds)
+		}
+	}
+
+	time.Sleep(100 * time.Microsecond)
+
+	for i := 1; i < maxInstance; i++ {
+		deps1 := nodes[0].InstanceMatrix[0][i].Dependencies()
+		deps2 := nodes[0].InstanceMatrix[1][i].Dependencies()
+		pos := uint64(i)
+		if deps1[1] == pos && deps2[0] == pos {
+			continue
+		}
+		t.Fatal("Incorrect conflict")
+	}
+}

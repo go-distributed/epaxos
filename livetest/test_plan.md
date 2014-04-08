@@ -8,9 +8,9 @@
 
  * Expect: All replicas have same correct logs(cmds, deps) eventually
 
-* Conflict commands, 1 proposer **(TODO)**
+* Conflict commands, 2 proposer **(DONE)**
 
- * Expect: All replicas have same correct logs(cmds, deps) eventually
+ * Expect: Two replicas have conflicted commands so they depend on each other.
 
 * Conflict commands, 3 proposers
 
