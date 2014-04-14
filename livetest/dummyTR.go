@@ -27,7 +27,7 @@ func (tr *DummyTransporter) MulticastFastquorum(msg replica.Message) {
 			skip = 1
 		}
 
-		tr.Send(uint8(rid), msg)
+		tr.Send(rid, msg)
 	}
 }
 

@@ -152,6 +152,7 @@ func Test2ProposerConflict(t *testing.T) {
 	maxInstance := 1024
 	nodes := livetestlibSetupCluster(3)
 
+	// node 0 and 1 are conflicted with each other
 	for i := 1; i < maxInstance; i++ {
 		for j := 0; j < 2; j++ {
 			cmds := livetestlibExampleCommands(i)
@@ -167,9 +168,43 @@ func Test2ProposerConflict(t *testing.T) {
 		deps1 := nodes[0].InstanceMatrix[0][i].Dependencies()
 		deps2 := nodes[0].InstanceMatrix[1][i].Dependencies()
 		pos := uint64(i)
-		if deps1[1] == pos && deps2[0] == pos {
-			continue
+		if !assert.Equal(t, deps1[1], pos) ||
+			!assert.Equal(t, deps2[0], pos) {
+			t.Fatal("Incorrect conflict")
 		}
-		t.Fatal("Incorrect conflict")
+	}
+}
+
+func Test3ProposerConflict(t *testing.T) {
+	maxInstance := 1024
+	nodes := livetestlibSetupCluster(3)
+
+	// node 0 must conflict with 1, maybe with 2
+	// node 1 must conflict with 0, maybe with 2
+	// node 2 must conflict with 0, maybe with 1
+	for i := 1; i < maxInstance; i++ {
+		for j := 0; j < 3; j++ {
+			cmds := livetestlibExampleCommands(i)
+			nodes[j].BatchPropose(cmds)
+		}
+	}
+
+	time.Sleep(100 * time.Microsecond)
+
+	assert.True(t, livetestlibLogConsistent(t, nodes...))
+
+	deps := make([]data.Dependencies, 3)
+	for i := 1; i < maxInstance; i++ {
+		deps[0] = nodes[0].InstanceMatrix[0][i].Dependencies()
+		deps[1] = nodes[0].InstanceMatrix[1][i].Dependencies()
+		deps[2] = nodes[0].InstanceMatrix[2][i].Dependencies()
+		pos := uint64(i)
+
+		if !assert.Equal(t, deps[0][1], pos) ||
+			!assert.Equal(t, deps[1][0], pos) ||
+			!assert.Equal(t, deps[2][0], pos) {
+			t.Fatal("Incorrect conflict")
+		}
+
 	}
 }
