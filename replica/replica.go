@@ -13,7 +13,9 @@ package replica
 
 import (
 	"container/list"
+	"encoding/json"
 	"errors"
+	"net"
 	"sort"
 	"time"
 
@@ -64,6 +66,7 @@ type Replica struct {
 	StateMachine     epaxos.StateMachine
 	Epoch            uint32
 	MessageEventChan chan *MessageEvent
+	Addrs            []string
 	Transporter
 
 	// tarjan SCC
@@ -73,6 +76,7 @@ type Replica struct {
 }
 
 type Param struct {
+	Addrs           []string
 	ReplicaId       uint8
 	Size            uint8
 	StateMachine    epaxos.StateMachine
@@ -85,18 +89,18 @@ type MessageEvent struct {
 	Message Message
 }
 
-//func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
-func New(param *Param) (r *Replica) {
+// TODO: add replica error in return values
+func New(param *Param) *Replica {
 	replicaId := param.ReplicaId
 	size := param.Size
 	sm := param.StateMachine
 	cycle := uint64(1024)
 
 	if size%2 == 0 {
-		// TODO: epaxos replica error
-		panic("size should be an odd number")
+		panic("Use odd number as quorum size")
 	}
-	r = &Replica{
+
+	r := &Replica{
 		Id:               replicaId,
 		Size:             size,
 		MaxInstanceNum:   make([]uint64, size),
@@ -110,6 +114,7 @@ func New(param *Param) (r *Replica) {
 		Epoch:            epochStart,
 		MessageEventChan: make(chan *MessageEvent),
 		sccStack:         list.New(),
+		Addrs:            param.Addrs,
 	}
 
 	for i := uint8(0); i < size; i++ {
@@ -121,10 +126,40 @@ func New(param *Param) (r *Replica) {
 }
 
 // Start running the replica. It shouldn't stop at any time.
-func (r *Replica) Start() {
+func (r *Replica) Start() error {
+	listener, err := net.Listen("udp", r.Addrs[r.Id])
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				glog.Errorln("listener is closed:", err)
+				return
+			}
+
+			go func(c net.Conn) {
+				// TODO: message size re-thought
+				data := make([]byte, 8192)
+				n, err := c.Read(data)
+				if err != nil {
+					glog.Errorln("UDP read:", err)
+					return
+				}
+
+				msgEvent := new(MessageEvent)
+				json.Unmarshal(data[:n], msgEvent)
+				r.MessageEventChan <- msgEvent
+			}(conn)
+		}
+	}()
+
 	go r.eventLoop()
 	//go r.executeLoop()
 	go r.proposeLoop()
+	return nil
 }
 
 // handling events
