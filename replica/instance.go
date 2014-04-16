@@ -18,14 +18,15 @@ package replica
 // @assumption (02/10/14):
 // - In initial round, replica will broadcast preaccept to fast quorum.
 // - In later rounds, replica will broadcast to all from preparing.
+// @assumption (04/17/14):
+// - The initial ballot is (epoch, 0, replicaId)
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/go-distributed/epaxos/data"
 )
-
-var _ = fmt.Printf
 
 // ****************************
 // *****  CONST ENUM **********
@@ -45,10 +46,11 @@ const (
 // ****************************
 
 type Instance struct {
-	cmds   data.Commands
-	deps   data.Dependencies
-	status uint8
-	ballot *data.Ballot
+	cmds        data.Commands
+	deps        data.Dependencies
+	status      uint8
+	ballot      *data.Ballot
+	lastTouched time.Time
 
 	info         *InstanceInfo
 	recoveryInfo *RecoveryInfo
@@ -139,7 +141,7 @@ func (i *Instance) isBeforeStatus(status uint8) bool {
 	return i.status < status
 }
 
-func (i *Instance) isAtInitialRound() bool {
+func (i *Instance) isNewBorn() bool {
 	return i.ballot.Epoch() == 0
 }
 
@@ -229,13 +231,15 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.Timeout:
+		return i.handleTimeout(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
 		}
 		return i.handlePrepare(content)
 	case *data.PrepareReply:
-		if i.isAtInitialRound() {
+		if i.isNewBorn() {
 			panic("Never send prepare before but receive prepare reply")
 		}
 		return noAction, nil
@@ -249,7 +253,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 // preaccepted instance
 // - handles preaccept-ok/-reply, preaccept, accept, commit, and prepare.
 func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
-	defer i.checkStatus(preAccepted, accepted, committed)
+	defer i.checkStatus(preAccepted, accepted, committed, preparing)
 
 	if !i.isAtStatus(preAccepted) {
 		panic("")
@@ -268,6 +272,8 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.Timeout:
+		return i.handleTimeout(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
@@ -303,7 +309,7 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 // - as a receiver
 // - - It will handle accept, prepare with larger ballot, and commit.
 func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
-	defer i.checkStatus(accepted, committed)
+	defer i.checkStatus(accepted, committed, preparing)
 
 	if !i.isAtStatus(accepted) {
 		panic("")
@@ -319,6 +325,8 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.Timeout:
+		return i.handleTimeout(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
@@ -357,6 +365,11 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 		return i.rejectPreAccept()
 	case *data.Accept:
 		return i.rejectAccept()
+	case *data.Timeout:
+		// we ignore the timeout event here,
+		// because sometimes timeout event
+		// comes right after the instance becomes committed
+		return noAction, nil
 	case *data.Prepare:
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
@@ -389,6 +402,8 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.Timeout:
+		return i.handleTimeout(content)
 	case *data.Prepare:
 		// the instance itself is the first one to have ballot of this
 		// magnitude. It can't receive others having the same
@@ -472,7 +487,7 @@ func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 
 // a propose will broadcasted to fast quorum in pre-accept message.
 func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAccept) {
-	if p.Cmds == nil || !i.isAtInitialRound() || !i.isAtStatus(nilStatus) {
+	if p.Cmds == nil || !i.isNewBorn() || !i.isAtStatus(nilStatus) {
 		panic("")
 	}
 
@@ -709,6 +724,11 @@ func (i *Instance) revertAndHandlePrepare(p *data.Prepare) (action uint8, msg *d
 	i.status = i.recoveryInfo.formerStatus
 	i.ballot = i.recoveryInfo.formerBallot
 	return i.handlePrepare(p)
+}
+
+func (i *Instance) handleTimeout(p *data.Timeout) (action uint8, msg *data.Prepare) {
+	i.enterPreparing()
+	return broadcastAction, i.makePrepare()
 }
 
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
@@ -978,6 +998,14 @@ func (i *Instance) makeCommit() *data.Commit {
 	}
 }
 
+func (i *Instance) makePrepare() *data.Prepare {
+	return &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     i.ballot.Clone(),
+	}
+}
+
 // *******************************
 // ******* State Transition ******
 // *******************************
@@ -1015,16 +1043,14 @@ func (i *Instance) enterPreparing() {
 	i.initRecoveryInfo()
 
 	// differentiates two cases on entering preparing:
+	// - (new born) never seen anything of this instance before.
 	// - seen any message about this instance before (with ballot).
-	// - never seen anything concerning this instance before.
-	if i.isAtInitialRound() {
-		// epoch.1.id
+	if i.isNewBorn() {
 		i.ballot = i.replica.makeInitialBallot()
-		i.ballot.IncNumber()
 	} else {
 		i.ballot.SetReplicaId(i.replica.Id)
-		i.ballot.IncNumber()
 	}
+	i.ballot.IncNumber()
 
 	i.status = preparing
 }
@@ -1040,8 +1066,28 @@ func (i *Instance) checkStatus(statusList ...uint8) {
 		}
 	}
 	if !ok {
-		panic("")
+		panic(i.StatusString())
 	}
+}
+
+// *******************************
+// ******* Timeout Related *******
+// *******************************
+func (i *Instance) touch() {
+	i.lastTouched = time.Now()
+}
+
+func (i *Instance) inactiveDuaration() time.Duration {
+	return time.Now().Sub(i.lastTouched)
+}
+
+// check if this instance is timeout
+func (i *Instance) isTimeout() bool {
+	if i.isBeforeStatus(committed) &&
+		i.inactiveDuaration() > i.replica.TimeoutInterval {
+		return true
+	}
+	return false
 }
 
 func (i *Instance) isExecuted() bool {
@@ -1062,6 +1108,8 @@ func (i *Instance) StatusString() string {
 		return "Accepted"
 	case committed:
 		return "Committed"
+	case preparing:
+		return "Preparing"
 	default:
 		panic("")
 	}

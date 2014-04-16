@@ -43,7 +43,7 @@ func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 	}
 	for i := 0; i < clusterSize; i++ {
 		param.ReplicaId = uint8(i)
-		nodes[i] = replica.New(param)
+		nodes[i], _ = replica.New(param)
 	}
 
 	for i := 0; i < clusterSize; i++ {

@@ -41,7 +41,8 @@ func commonTestlibExampleReplica() *Replica {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	return New(param)
+	r, _ := New(param)
+	return r
 }
 
 func commonTestlibExampleInstance() *Instance {
@@ -50,7 +51,7 @@ func commonTestlibExampleInstance() *Instance {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	r := New(param)
+	r, _ := New(param)
 	i := NewInstance(r, r.Id+1, conflictNotFound+1) // make rowId different with i.replica.Id
 	return i
 }
@@ -137,6 +138,7 @@ func commonTestlibCloneInstance(inst *Instance) *Instance {
 		rowId:        inst.rowId,
 		id:           inst.id,
 		executed:     inst.executed,
+		lastTouched:  inst.lastTouched,
 	}
 }
 
@@ -148,7 +150,7 @@ func TestNewInstance(t *testing.T) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	r := New(param)
+	r, _ := New(param)
 	i := NewInstance(r, expectedReplicaId, expectedInstanceId)
 	assert.Equal(t, i.replica.Id, expectedReplicaId)
 	assert.Equal(t, i.rowId, expectedReplicaId)
@@ -2981,6 +2983,48 @@ func TestMakeRecoveryDecision(t *testing.T) {
 
 	i.recoveryInfo.status = nilStatus - 1
 	assert.Panics(t, func() { i.makeRecoveryDecision() })
+}
+
+func TestHandleTimeout(t *testing.T) {
+	// TODO: enterpreparing
+	i := commonTestlibExampleNilStatusInstance()
+	act, msg := i.handleTimeout(&data.Timeout{})
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     data.NewBallot(1, 1, 0),
+	})
+
+	i = commonTestlibExamplePreAcceptedInstance()
+	act, msg = i.handleTimeout(&data.Timeout{})
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     data.NewBallot(1, 1, 0),
+	})
+
+	i = commonTestlibExampleAcceptedInstance()
+	act, msg = i.handleTimeout(&data.Timeout{})
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     data.NewBallot(1, 1, 0),
+	})
+
+	i = commonTestlibExamplePreparingInstance()
+	act, msg = i.handleTimeout(&data.Timeout{})
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     data.NewBallot(1, 2, 0),
+	})
+
+	i = commonTestlibExampleCommittedInstance()
+	assert.Panics(t, func() { i.handleTimeout(&data.Timeout{}) })
 }
 
 // Tests for getters

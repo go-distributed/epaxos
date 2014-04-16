@@ -13,8 +13,10 @@ package replica
 
 import (
 	"container/list"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"time"
 
@@ -24,9 +26,12 @@ import (
 	"github.com/go-distributed/epaxos/data"
 )
 
-var _ = fmt.Printf
-
+// #if test
 var v1Log = glog.V(0)
+
+// #else
+// var v1Log = glog.V(1)
+// #end
 
 var (
 	errConflictsNotFullyResolved = errors.New("Conflicts not fully resolved")
@@ -50,23 +55,28 @@ const (
 	broadcastAction
 )
 
+const defaultStartPort = 8080
+
 // ****************************
 // ***** TYPE STRUCT **********
 // ****************************
 
 type Replica struct {
-	Id               uint8
-	Size             uint8
-	MaxInstanceNum   []uint64 // the highest instance number seen for each replica
-	ProposeNum       uint64
-	ProposeChan      chan data.Command
-	BatchInterval    time.Duration
+	Id              uint8
+	Size            uint8
+	MaxInstanceNum  []uint64 // the highest instance number seen for each replica
+	ProposeNum      uint64
+	ProposeChan     chan data.Command
+	BatchInterval   time.Duration
+	TimeoutInterval time.Duration
+
 	CheckpointCycle  uint64
 	ExecutedUpTo     []uint64
 	InstanceMatrix   [][]*Instance
 	StateMachine     epaxos.StateMachine
 	Epoch            uint32
 	MessageEventChan chan *MessageEvent
+	Addrs            []string
 	Transporter
 
 	// tarjan SCC
@@ -81,6 +91,8 @@ type Param struct {
 	StateMachine    epaxos.StateMachine
 	CheckpointCycle uint64
 	BatchInterval   time.Duration
+	TimeoutInterval time.Duration
+	Addrs           []string
 }
 
 type MessageEvent struct {
@@ -88,53 +100,143 @@ type MessageEvent struct {
 	Message Message
 }
 
-//func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
-func New(param *Param) (r *Replica) {
-	replicaId := param.ReplicaId
-	size := param.Size
-	sm := param.StateMachine
-	cycle := uint64(1024)
-
-	if size%2 == 0 {
-		// TODO: epaxos replica error
-		panic("size should be an odd number")
+func verifyparam(param *Param) error {
+	// TODO: replicaID, uuid
+	if param.Size == 0 {
+		param.Size = 3
 	}
-	r = &Replica{
-		Id:               replicaId,
-		Size:             size,
-		MaxInstanceNum:   make([]uint64, size),
+	if param.Size%2 == 0 {
+		// TODO: epaxos replica error
+		return fmt.Errorf("Use odd number as quorum size")
+	}
+	if param.CheckpointCycle == 0 {
+		param.CheckpointCycle = 1024
+	}
+	if param.BatchInterval == 0 {
+		param.BatchInterval = time.Millisecond * 50
+	}
+	if param.TimeoutInterval == 0 {
+		param.TimeoutInterval = time.Millisecond * 50
+	}
+	if param.Addrs == nil {
+		param.Addrs = make([]string, param.Size)
+		for i := 0; i < int(param.Size); i++ {
+			fmt.Sprintf(param.Addrs[i], "localhost:%d", defaultStartPort)
+		}
+	}
+	return nil
+}
+
+func New(param *Param) (*Replica, error) {
+	err := verifyparam(param)
+	if err != nil {
+		return nil, err
+	}
+	r := &Replica{
+		Id:               param.ReplicaId,
+		Size:             param.Size,
+		MaxInstanceNum:   make([]uint64, param.Size),
 		ProposeNum:       1, // instance.id start from 1
 		ProposeChan:      make(chan data.Command),
-		BatchInterval:    5 * time.Millisecond,
-		CheckpointCycle:  cycle,
-		ExecutedUpTo:     make([]uint64, size),
-		InstanceMatrix:   make([][]*Instance, size),
-		StateMachine:     sm,
+		BatchInterval:    param.BatchInterval,
+		TimeoutInterval:  param.TimeoutInterval,
+		CheckpointCycle:  param.CheckpointCycle,
+		ExecutedUpTo:     make([]uint64, param.Size),
+		InstanceMatrix:   make([][]*Instance, param.Size),
+		StateMachine:     param.StateMachine,
 		Epoch:            epochStart,
 		MessageEventChan: make(chan *MessageEvent),
 		sccStack:         list.New(),
+		Addrs:            param.Addrs,
 	}
 
-	for i := uint8(0); i < size; i++ {
+	for i := uint8(0); i < param.Size; i++ {
 		r.InstanceMatrix[i] = make([]*Instance, defaultInstancesLength)
 		r.MaxInstanceNum[i] = conflictNotFound
+		r.ExecutedUpTo[i] = conflictNotFound
 	}
 
-	return r
+	r.Transporter, err = NewNetworkTransporter(param.Addrs, r.Id, r.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	return r, nil
 }
 
 // Start running the replica. It shouldn't stop at any time.
-func (r *Replica) Start() {
+func (r *Replica) Start() error {
+	addr, err := net.ResolveUDPAddr("udp", r.Addrs[r.Id])
+	if err != nil {
+		return err
+	}
+
+	sock, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Listening on port", r.Addrs[r.Id])
+	go func() {
+		for {
+			data := make([]byte, 1024*16)
+			rlen, err := sock.Read(data)
+			if err != nil {
+				glog.Errorln("listener is closed:", err)
+				return
+			}
+
+			go func(b []byte, n int) {
+				msgEvent := new(MessageEvent)
+				json.Unmarshal(b[:n], msgEvent)
+				r.MessageEventChan <- msgEvent
+			}(data, rlen)
+		}
+	}()
+
 	go r.eventLoop()
 	//go r.executeLoop()
 	go r.proposeLoop()
+	go r.timeoutLoop()
+	return nil
+}
+
+func (r *Replica) timeoutLoop() {
+	for {
+		time.Sleep(r.TimeoutInterval)
+		r.checkTimeout()
+	}
+}
+
+func (r *Replica) checkTimeout() {
+	for i, instance := range r.InstanceMatrix {
+		// from executeupto to max, test timestamp,
+		// if timeout, then send prepare
+		for j := r.ExecutedUpTo[i] + 1; j <= r.MaxInstanceNum[i]; j++ {
+			if r.IsCheckpoint(j) { // [*]Note: the first instance is also a checkpoint
+				continue
+			}
+			if instance[j].isTimeout() {
+				r.MessageEventChan <- r.makeTimeout(uint8(i), j)
+			}
+		}
+	}
+}
+
+func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *MessageEvent {
+	return &MessageEvent{
+		From: rowId,
+		Message: &data.Timeout{
+			ReplicaId:  rowId,
+			InstanceId: instanceId,
+		},
+	}
+	return nil
 }
 
 // handling events
 func (r *Replica) eventLoop() {
 	for {
-		// TODO: check timeout
-		// add time.After for timeout checking
 		select {
 		case mevent := <-r.MessageEventChan:
 			r.dispatch(mevent)
@@ -216,11 +318,13 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 	}
 
 	i := r.InstanceMatrix[replicaId][instanceId]
-	var action uint8
-	var msg Message
+	i.touch() // update last touched timestamp
 
 	v1Log.Infof("Replica[%v]: instance[%v][%v] status before = %v\n",
 		r.Id, replicaId, instanceId, i.StatusString())
+
+	var action uint8
+	var msg Message
 
 	switch i.status {
 	case nilStatus:
@@ -231,6 +335,8 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 		action, msg = i.acceptedProcess(eventMsg)
 	case committed:
 		action, msg = i.committedProcess(eventMsg)
+	case preparing:
+		action, msg = i.preparingProcess(eventMsg)
 	default:
 		panic("")
 	}
