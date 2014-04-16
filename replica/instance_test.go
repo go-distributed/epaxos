@@ -41,7 +41,8 @@ func commonTestlibExampleReplica() *Replica {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	return New(param)
+	r, _ := New(param)
+	return r
 }
 
 func commonTestlibExampleInstance() *Instance {
@@ -50,7 +51,7 @@ func commonTestlibExampleInstance() *Instance {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	r := New(param)
+	r, _ := New(param)
 	i := NewInstance(r, r.Id+1, conflictNotFound+1) // make rowId different with i.replica.Id
 	return i
 }
@@ -148,7 +149,7 @@ func TestNewInstance(t *testing.T) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	r := New(param)
+	r, _ := New(param)
 	i := NewInstance(r, expectedReplicaId, expectedInstanceId)
 	assert.Equal(t, i.replica.Id, expectedReplicaId)
 	assert.Equal(t, i.rowId, expectedReplicaId)
