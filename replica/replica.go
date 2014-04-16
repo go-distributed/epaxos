@@ -14,7 +14,6 @@ package replica
 import (
 	"container/list"
 	"errors"
-	"fmt"
 	"sort"
 	"time"
 
@@ -23,8 +22,6 @@ import (
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/data"
 )
-
-var _ = fmt.Printf
 
 var v1Log = glog.V(0)
 
