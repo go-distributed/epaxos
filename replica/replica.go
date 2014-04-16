@@ -26,7 +26,12 @@ import (
 
 var _ = fmt.Printf
 
+// #if test
 var v1Log = glog.V(0)
+
+// #else
+// var v1Log = glog.V(1)
+// #end
 
 var (
 	errConflictsNotFullyResolved = errors.New("Conflicts not fully resolved")
@@ -40,6 +45,7 @@ const (
 	conflictNotFound       = 0
 	epochStart             = 1
 	executeInterval        = 5 * time.Millisecond
+	timeoutInterval        = 5 * time.Second
 )
 
 // actions
@@ -128,13 +134,44 @@ func (r *Replica) Start() {
 	go r.eventLoop()
 	//go r.executeLoop()
 	go r.proposeLoop()
+	go r.timeoutLoop()
+}
+
+func (r *Replica) timeoutLoop() {
+	for {
+		time.Sleep(timeoutInterval)
+		r.checkTimeout()
+	}
+}
+
+func (r *Replica) checkTimeout() {
+	for i, instance := range r.InstanceMatrix {
+		// from executeupto to max, test timestamp,
+		// if timeout, then send prepare
+		for j := r.ExecutedUpTo[i]; j < r.MaxInstanceNum[i]; i++ {
+			if r.IsCheckpoint(j) {
+				continue
+			}
+			if instance[j].isTimeout() {
+				r.MessageEventChan <- r.makePrepareTrigger(uint8(i), j)
+			}
+		}
+	}
+}
+
+func (r *Replica) makePrepareTrigger(rowId uint8, instanceId uint64) *MessageEvent {
+	return &MessageEvent{
+		From: rowId,
+		Message: &data.PrepareTrigger{
+			ReplicaId:  rowId,
+			InstanceId: instanceId,
+		},
+	}
 }
 
 // handling events
 func (r *Replica) eventLoop() {
 	for {
-		// TODO: check timeout
-		// add time.After for timeout checking
 		select {
 		case mevent := <-r.MessageEventChan:
 			r.dispatch(mevent)
@@ -216,11 +253,13 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 	}
 
 	i := r.InstanceMatrix[replicaId][instanceId]
-	var action uint8
-	var msg Message
+	i.touch() // update last touched timestamp
 
 	v1Log.Infof("Replica[%v]: instance[%v][%v] status before = %v\n",
 		r.Id, replicaId, instanceId, i.StatusString())
+
+	var action uint8
+	var msg Message
 
 	switch i.status {
 	case nilStatus:

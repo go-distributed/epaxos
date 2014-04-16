@@ -21,6 +21,7 @@ package replica
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/go-distributed/epaxos/data"
 )
@@ -45,10 +46,11 @@ const (
 // ****************************
 
 type Instance struct {
-	cmds   data.Commands
-	deps   data.Dependencies
-	status uint8
-	ballot *data.Ballot
+	cmds        data.Commands
+	deps        data.Dependencies
+	status      uint8
+	ballot      *data.Ballot
+	lastTouched time.Time
 
 	info         *InstanceInfo
 	recoveryInfo *RecoveryInfo
@@ -229,6 +231,8 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.PrepareTrigger:
+		return i.handlePrepareTrigger(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
@@ -268,6 +272,8 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.PrepareTrigger:
+		return i.handlePrepareTrigger(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
@@ -319,6 +325,8 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.PrepareTrigger:
+		return i.handlePrepareTrigger(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
@@ -357,6 +365,8 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 		return i.rejectPreAccept()
 	case *data.Accept:
 		return i.rejectAccept()
+	case *data.PrepareTrigger:
+		panic("")
 	case *data.Prepare:
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
@@ -389,6 +399,8 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
+	case *data.PrepareTrigger:
+		return i.handlePrepareTrigger(content)
 	case *data.Prepare:
 		// the instance itself is the first one to have ballot of this
 		// magnitude. It can't receive others having the same
@@ -711,6 +723,11 @@ func (i *Instance) revertAndHandlePrepare(p *data.Prepare) (action uint8, msg *d
 	return i.handlePrepare(p)
 }
 
+func (i *Instance) handlePrepareTrigger(p *data.PrepareTrigger) (action uint8, msg *data.Prepare) {
+	i.enterPreparing()
+	return broadcastAction, i.makePrepare()
+}
+
 func (i *Instance) handlePrepare(p *data.Prepare) (action uint8, msg *data.PrepareReply) {
 	oldBallot := i.ballot.Clone()
 
@@ -978,6 +995,14 @@ func (i *Instance) makeCommit() *data.Commit {
 	}
 }
 
+func (i *Instance) makePrepare() *data.Prepare {
+	return &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     i.ballot.Clone(),
+	}
+}
+
 // *******************************
 // ******* State Transition ******
 // *******************************
@@ -1042,6 +1067,26 @@ func (i *Instance) checkStatus(statusList ...uint8) {
 	if !ok {
 		panic("")
 	}
+}
+
+// *******************************
+// ******* Timeout Related *******
+// *******************************
+func (i *Instance) touch() {
+	i.lastTouched = time.Now()
+}
+
+func (i *Instance) inactiveDuaration() time.Duration {
+	return time.Now().Sub(i.lastTouched)
+}
+
+// check if this instance is timeout
+func (i *Instance) isTimeout() bool {
+	if i.isBeforeStatus(committed) &&
+		i.inactiveDuaration() > timeoutInterval {
+		return true
+	}
+	return false
 }
 
 func (i *Instance) isExecuted() bool {
