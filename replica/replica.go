@@ -15,6 +15,7 @@ import (
 	"container/list"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"sort"
 	"time"
@@ -76,12 +77,12 @@ type Replica struct {
 }
 
 type Param struct {
-	Addrs           []string
-	ReplicaId       uint8
-	Size            uint8
-	StateMachine    epaxos.StateMachine
-	CheckpointCycle uint64
-	BatchInterval   time.Duration
+	Addrs        []string
+	ReplicaId    uint8
+	Size         uint8
+	StateMachine epaxos.StateMachine
+	//CheckpointCycle uint64
+	//BatchInterval   time.Duration
 }
 
 type MessageEvent struct {
@@ -89,15 +90,14 @@ type MessageEvent struct {
 	Message Message
 }
 
-// TODO: add replica error in return values
-func New(param *Param) *Replica {
+func New(param *Param) (*Replica, error) {
 	replicaId := param.ReplicaId
 	size := param.Size
 	sm := param.StateMachine
 	cycle := uint64(1024)
 
 	if size%2 == 0 {
-		panic("Use odd number as quorum size")
+		return nil, fmt.Errorf("Use odd number as quorum size")
 	}
 
 	r := &Replica{
@@ -122,7 +122,13 @@ func New(param *Param) *Replica {
 		r.MaxInstanceNum[i] = conflictNotFound
 	}
 
-	return r
+	var err error
+	r.Transporter, err = NewNetworkTransporter(param.Addrs, r.Id, r.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	return r, nil
 }
 
 // Start running the replica. It shouldn't stop at any time.

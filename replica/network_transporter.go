@@ -71,7 +71,7 @@ func (nt *NetworkTransporter) MulticastFastquorum(msg Message) {
 	}
 }
 
-func (nt *NetworkTransporter) Broadcast(to uint8, msg Message) {
+func (nt *NetworkTransporter) Broadcast(msg Message) {
 	for i := uint8(0); i < nt.All; i++ {
 		if i == nt.Self {
 			continue
