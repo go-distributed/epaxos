@@ -19,7 +19,7 @@ func TestNewReplica(t *testing.T) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	r := New(param)
+	r, _ := New(param)
 
 	assert.True(t, r.Id == 3)
 	assert.True(t, r.Size == 5)
@@ -33,7 +33,8 @@ func TestNewReplica(t *testing.T) {
 	}
 
 	param.Size = 4
-	assert.Panics(t, func() { New(param) })
+	_, err := New(param)
+	assert.NotNil(t, err)
 }
 
 func TestMakeInitialBallot(t *testing.T) {
@@ -42,7 +43,7 @@ func TestMakeInitialBallot(t *testing.T) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	r := New(param)
+	r, _ := New(param)
 	r.Epoch = 3
 	b := r.makeInitialBallot()
 	assert.Equal(t, b, data.NewBallot(3, 0, 3))
@@ -55,7 +56,7 @@ func depsTestSetupReplica() (r *Replica, i *Instance) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 	}
-	r = New(param)
+	r, _ = New(param)
 	for i := 0; i < 5; i++ {
 		r.MaxInstanceNum[i] = uint64(conflictNotFound + 1 + uint64(i))
 		instance := NewInstance(r, r.Id, conflictNotFound+1+uint64(i))

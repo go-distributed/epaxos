@@ -13,8 +13,10 @@ package replica
 
 import (
 	"container/list"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"time"
 
@@ -23,8 +25,6 @@ import (
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/data"
 )
-
-var _ = fmt.Printf
 
 // #if test
 var v1Log = glog.V(0)
@@ -74,6 +74,7 @@ type Replica struct {
 	StateMachine     epaxos.StateMachine
 	Epoch            uint32
 	MessageEventChan chan *MessageEvent
+	Addrs            []string
 	Transporter
 
 	// tarjan SCC
@@ -89,6 +90,7 @@ type Param struct {
 	CheckpointCycle uint64
 	BatchInterval   time.Duration
 	TimeoutInterval time.Duration
+	Addrs           []string
 }
 
 type MessageEvent struct {
@@ -96,14 +98,14 @@ type MessageEvent struct {
 	Message Message
 }
 
-func verifyparam(param *Param) {
+func verifyparam(param *Param) error {
 	// TODO: replicaID, uuid
 	if param.Size == 0 {
 		param.Size = 3
 	}
 	if param.Size%2 == 0 {
 		// TODO: epaxos replica error
-		panic("size should be an odd number")
+		return fmt.Errorf("Use odd number as quorum size")
 	}
 	if param.CheckpointCycle == 0 {
 		param.CheckpointCycle = 1024
@@ -114,12 +116,16 @@ func verifyparam(param *Param) {
 	if param.TimeoutInterval == 0 {
 		param.TimeoutInterval = time.Millisecond * 50
 	}
+	return nil
 }
 
 //func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
-func New(param *Param) (r *Replica) {
-	verifyparam(param)
-	r = &Replica{
+func New(param *Param) (*Replica, error) {
+	err := verifyparam(param)
+	if err != nil {
+		return nil, err
+	}
+	r := &Replica{
 		Id:               param.ReplicaId,
 		Size:             param.Size,
 		MaxInstanceNum:   make([]uint64, param.Size),
@@ -134,6 +140,7 @@ func New(param *Param) (r *Replica) {
 		Epoch:            epochStart,
 		MessageEventChan: make(chan *MessageEvent),
 		sccStack:         list.New(),
+		Addrs:            param.Addrs,
 	}
 
 	for i := uint8(0); i < param.Size; i++ {
@@ -142,15 +149,49 @@ func New(param *Param) (r *Replica) {
 		r.ExecutedUpTo[i] = conflictNotFound
 	}
 
-	return r
+	r.Transporter, err = NewNetworkTransporter(param.Addrs, r.Id, r.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	return r, nil
 }
 
 // Start running the replica. It shouldn't stop at any time.
-func (r *Replica) Start() {
+func (r *Replica) Start() error {
+	addr, err := net.ResolveUDPAddr("udp", r.Addrs[r.Id])
+	if err != nil {
+		return err
+	}
+
+	sock, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Listening on port", r.Addrs[r.Id])
+	go func() {
+		for {
+			data := make([]byte, 1024*16)
+			rlen, err := sock.Read(data)
+			if err != nil {
+				glog.Errorln("listener is closed:", err)
+				return
+			}
+
+			go func(b []byte, n int) {
+				msgEvent := new(MessageEvent)
+				json.Unmarshal(b[:n], msgEvent)
+				r.MessageEventChan <- msgEvent
+			}(data, rlen)
+		}
+	}()
+
 	go r.eventLoop()
 	//go r.executeLoop()
 	go r.proposeLoop()
 	go r.timeoutLoop()
+	return nil
 }
 
 func (r *Replica) timeoutLoop() {
@@ -183,6 +224,7 @@ func (r *Replica) makePrepareTrigger(rowId uint8, instanceId uint64) *MessageEve
 			InstanceId: instanceId,
 		},
 	}
+	return nil
 }
 
 // handling events

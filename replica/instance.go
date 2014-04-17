@@ -26,8 +26,6 @@ import (
 	"github.com/go-distributed/epaxos/data"
 )
 
-var _ = fmt.Printf
-
 // ****************************
 // *****  CONST ENUM **********
 // ****************************
@@ -142,7 +140,7 @@ func (i *Instance) isBeforeStatus(status uint8) bool {
 	return i.status < status
 }
 
-func (i *Instance) isAtInitialRound() bool {
+func (i *Instance) isNewBorn() bool {
 	return i.ballot.Epoch() == 0
 }
 
@@ -240,7 +238,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		}
 		return i.handlePrepare(content)
 	case *data.PrepareReply:
-		if i.isAtInitialRound() {
+		if i.isNewBorn() {
 			panic("Never send prepare before but receive prepare reply")
 		}
 		return noAction, nil
@@ -485,7 +483,7 @@ func (i *Instance) rejectPrepare() (action uint8, reply *data.PrepareReply) {
 
 // a propose will broadcasted to fast quorum in pre-accept message.
 func (i *Instance) handlePropose(p *data.Propose) (action uint8, msg *data.PreAccept) {
-	if p.Cmds == nil || !i.isAtInitialRound() || !i.isAtStatus(nilStatus) {
+	if p.Cmds == nil || !i.isNewBorn() || !i.isAtStatus(nilStatus) {
 		panic("")
 	}
 
@@ -1041,16 +1039,14 @@ func (i *Instance) enterPreparing() {
 	i.initRecoveryInfo()
 
 	// differentiates two cases on entering preparing:
+	// - (new born) never seen anything of this instance before.
 	// - seen any message about this instance before (with ballot).
-	// - never seen anything concerning this instance before.
-	if i.isAtInitialRound() {
-		// epoch.1.id
+	if i.isNewBorn() {
 		i.ballot = i.replica.makeInitialBallot()
-		i.ballot.IncNumber()
 	} else {
 		i.ballot.SetReplicaId(i.replica.Id)
-		i.ballot.IncNumber()
 	}
+	i.ballot.IncNumber()
 
 	i.status = preparing
 }
