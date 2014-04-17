@@ -45,7 +45,7 @@ func (p *PreAccept) Instance() uint64 {
 }
 
 func (p *PreAccept) String() string {
-	return fmt.Sprintf("PreAccept, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
+	return fmt.Sprintf("PreAccept, Instance[%v][%v], Ballot[%v]", p.ReplicaId, p.InstanceId, p.Ballot.String())
 }
 
 // PreAcceptOk
@@ -87,5 +87,5 @@ func (p *PreAcceptReply) Instance() uint64 {
 }
 
 func (p *PreAcceptReply) String() string {
-	return fmt.Sprintf("PreAcceptReply, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
+	return fmt.Sprintf("PreAcceptReply, Instance[%v][%v], Ballot[%v]", p.ReplicaId, p.InstanceId, p.Ballot.String())
 }
