@@ -55,6 +55,8 @@ const (
 	broadcastAction
 )
 
+const defaultStartPort = 8080
+
 // ****************************
 // ***** TYPE STRUCT **********
 // ****************************
@@ -116,10 +118,15 @@ func verifyparam(param *Param) error {
 	if param.TimeoutInterval == 0 {
 		param.TimeoutInterval = time.Millisecond * 50
 	}
+	if param.Addrs == nil {
+		param.Addrs = make([]string, param.Size)
+		for i := 0; i < int(param.Size); i++ {
+			fmt.Sprintf(param.Addrs[i], "localhost:%d", defaultStartPort)
+		}
+	}
 	return nil
 }
 
-//func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
 func New(param *Param) (*Replica, error) {
 	err := verifyparam(param)
 	if err != nil {
@@ -210,16 +217,16 @@ func (r *Replica) checkTimeout() {
 				continue
 			}
 			if instance[j].isTimeout() {
-				r.MessageEventChan <- r.makePrepareTrigger(uint8(i), j)
+				r.MessageEventChan <- r.makeTimeout(uint8(i), j)
 			}
 		}
 	}
 }
 
-func (r *Replica) makePrepareTrigger(rowId uint8, instanceId uint64) *MessageEvent {
+func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *MessageEvent {
 	return &MessageEvent{
 		From: rowId,
-		Message: &data.PrepareTrigger{
+		Message: &data.Timeout{
 			ReplicaId:  rowId,
 			InstanceId: instanceId,
 		},
@@ -328,6 +335,8 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 		action, msg = i.acceptedProcess(eventMsg)
 	case committed:
 		action, msg = i.committedProcess(eventMsg)
+	case preparing:
+		action, msg = i.preparingProcess(eventMsg)
 	default:
 		panic("")
 	}

@@ -11,5 +11,5 @@ const (
 	CommitMsg
 	PrepareMsg
 	PrepareReplyMsg
-	PrepareTriggerMsg
+	TimeoutMsg
 )

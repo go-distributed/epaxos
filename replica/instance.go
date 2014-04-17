@@ -18,6 +18,8 @@ package replica
 // @assumption (02/10/14):
 // - In initial round, replica will broadcast preaccept to fast quorum.
 // - In later rounds, replica will broadcast to all from preparing.
+// @assumption (04/17/14):
+// - The initial ballot is (1, 0, replicaId)
 
 import (
 	"fmt"
@@ -230,8 +232,8 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
-	case *data.PrepareTrigger:
-		return i.handlePrepareTrigger(content)
+	case *data.Timeout:
+		return i.handleTimeout(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
@@ -252,7 +254,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 // preaccepted instance
 // - handles preaccept-ok/-reply, preaccept, accept, commit, and prepare.
 func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
-	defer i.checkStatus(preAccepted, accepted, committed)
+	defer i.checkStatus(preAccepted, accepted, committed, preparing)
 
 	if !i.isAtStatus(preAccepted) {
 		panic("")
@@ -271,8 +273,8 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
-	case *data.PrepareTrigger:
-		return i.handlePrepareTrigger(content)
+	case *data.Timeout:
+		return i.handleTimeout(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
@@ -308,7 +310,7 @@ func (i *Instance) preAcceptedProcess(m Message) (action uint8, msg Message) {
 // - as a receiver
 // - - It will handle accept, prepare with larger ballot, and commit.
 func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
-	defer i.checkStatus(accepted, committed)
+	defer i.checkStatus(accepted, committed, preparing)
 
 	if !i.isAtStatus(accepted) {
 		panic("")
@@ -324,8 +326,8 @@ func (i *Instance) acceptedProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
-	case *data.PrepareTrigger:
-		return i.handlePrepareTrigger(content)
+	case *data.Timeout:
+		return i.handleTimeout(content)
 	case *data.Prepare:
 		if content.Ballot.Compare(i.ballot) < 0 {
 			return i.rejectPrepare()
@@ -364,8 +366,11 @@ func (i *Instance) committedProcess(m Message) (action uint8, msg Message) {
 		return i.rejectPreAccept()
 	case *data.Accept:
 		return i.rejectAccept()
-	case *data.PrepareTrigger:
-		panic("")
+	case *data.Timeout:
+		// we ignore the timeout event here,
+		// because sometimes timeout event
+		// comes right after the instance becomes committed
+		return noAction, nil
 	case *data.Prepare:
 		return i.handlePrepare(content)
 	case *data.PreAcceptReply, *data.PreAcceptOk, *data.AcceptReply, *data.PrepareReply, *data.Commit:
@@ -398,8 +403,8 @@ func (i *Instance) preparingProcess(m Message) (action uint8, msg Message) {
 		return i.handleAccept(content)
 	case *data.Commit:
 		return i.handleCommit(content)
-	case *data.PrepareTrigger:
-		return i.handlePrepareTrigger(content)
+	case *data.Timeout:
+		return i.handleTimeout(content)
 	case *data.Prepare:
 		// the instance itself is the first one to have ballot of this
 		// magnitude. It can't receive others having the same
@@ -722,7 +727,7 @@ func (i *Instance) revertAndHandlePrepare(p *data.Prepare) (action uint8, msg *d
 	return i.handlePrepare(p)
 }
 
-func (i *Instance) handlePrepareTrigger(p *data.PrepareTrigger) (action uint8, msg *data.Prepare) {
+func (i *Instance) handleTimeout(p *data.Timeout) (action uint8, msg *data.Prepare) {
 	i.enterPreparing()
 	return broadcastAction, i.makePrepare()
 }
@@ -1062,7 +1067,7 @@ func (i *Instance) checkStatus(statusList ...uint8) {
 		}
 	}
 	if !ok {
-		panic("")
+		panic(i.StatusString())
 	}
 }
 
@@ -1104,6 +1109,8 @@ func (i *Instance) StatusString() string {
 		return "Accepted"
 	case committed:
 		return "Committed"
+	case preparing:
+		return "Preparing"
 	default:
 		panic("")
 	}

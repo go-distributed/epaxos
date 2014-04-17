@@ -621,7 +621,7 @@ func TestTimeout2(t *testing.T) {
 			case msg := <-r.MessageEventChan:
 				assert.Equal(t, msg, &MessageEvent{
 					From: uint8(i),
-					Message: &data.PrepareTrigger{
+					Message: &data.Timeout{
 						ReplicaId:  uint8(i),
 						InstanceId: uint64(j),
 					},
