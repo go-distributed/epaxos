@@ -233,7 +233,7 @@ func (i *Instance) nilStatusProcess(m Message) (action uint8, msg Message) {
 		}
 		return i.handlePrepare(content)
 	case *data.PrepareReply:
-		if i.isNewBorn() {
+		if i.isNewBorn() || i.ballot.Number() == 0 {
 			panic("Never send prepare before but receive prepare reply")
 		}
 		return noAction, nil
