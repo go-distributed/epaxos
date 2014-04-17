@@ -133,32 +133,31 @@ func New(param *Param) (*Replica, error) {
 
 // Start running the replica. It shouldn't stop at any time.
 func (r *Replica) Start() error {
-	listener, err := net.Listen("udp", r.Addrs[r.Id])
+	addr, err := net.ResolveUDPAddr("udp", r.Addrs[r.Id])
 	if err != nil {
 		return err
 	}
 
+	sock, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Listening on port", r.Addrs[r.Id])
 	go func() {
 		for {
-			conn, err := listener.Accept()
+			data := make([]byte, 1024*16)
+			rlen, err := sock.Read(data)
 			if err != nil {
 				glog.Errorln("listener is closed:", err)
 				return
 			}
 
-			go func(c net.Conn) {
-				// TODO: message size re-thought
-				data := make([]byte, 8192)
-				n, err := c.Read(data)
-				if err != nil {
-					glog.Errorln("UDP read:", err)
-					return
-				}
-
+			go func(b []byte, n int) {
 				msgEvent := new(MessageEvent)
-				json.Unmarshal(data[:n], msgEvent)
+				json.Unmarshal(b[:n], msgEvent)
 				r.MessageEventChan <- msgEvent
-			}(conn)
+			}(data, rlen)
 		}
 	}()
 
