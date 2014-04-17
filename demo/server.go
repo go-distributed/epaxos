@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
 	"time"
@@ -13,6 +14,10 @@ import (
 )
 
 var _ = fmt.Printf
+
+const (
+	chars = "ABCDEFG"
+)
 
 func main() {
 	addrs := []string{
@@ -43,7 +48,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	time.Sleep(time.Millisecond * 100)
+	rand.Seed(time.Now().UTC().UnixNano())
+	for {
+		time.Sleep(time.Millisecond * 500)
+		c := string(chars[rand.Intn(len(chars))])
 
-	r.Propose(data.Command("a"))
+		r.Propose(data.Command(c))
+	}
 }
