@@ -3,6 +3,7 @@ package replica
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/data"
@@ -540,4 +541,99 @@ func TestExecuteListWithError(t *testing.T) {
 	// test the exection result
 	executionLogStr := fmt.Sprint(r.StateMachine.(*test.DummySM).ExecutionLog)
 	assert.Equal(t, executionLogStr, expectLogStr)
+}
+
+func makeTimeoutInstances(r *Replica) {
+}
+
+// This function tests the timeout mechanism
+func TestNoTimeout1(t *testing.T) {
+	r := commonTestlibExampleReplica()
+	time.Sleep(2 * r.TimeoutInterval)
+	go r.checkTimeout()
+	select {
+	case <-r.MessageEventChan:
+		t.Fatal("shouldn't get a timeout message")
+	default:
+	}
+}
+
+// Should not timeout for a committed instance
+func TestNoTimeout2(t *testing.T) {
+	r := commonTestlibExampleReplica()
+	r.InstanceMatrix[0][1] = commonTestlibExampleCommittedInstance()
+	r.MaxInstanceNum[0] = 1
+	time.Sleep(2 * r.TimeoutInterval)
+	go r.checkTimeout()
+	select {
+	case <-r.MessageEventChan:
+		t.Fatal("shouldn't get a timeout message for committed instance")
+	default:
+	}
+}
+
+// test one timeout
+func TestTimeout1(t *testing.T) {
+	r := commonTestlibExampleReplica()
+	r.InstanceMatrix[0][1] = commonTestlibExampleAcceptedInstance()
+	r.MaxInstanceNum[0] = 1
+	time.Sleep(2 * r.TimeoutInterval)
+	go r.checkTimeout()
+	time.Sleep(r.TimeoutInterval) // wait for message sending
+
+	select {
+	case <-r.MessageEventChan:
+	default:
+		t.Fatal("should get a timeout message from a uncommitted instance")
+	}
+
+	time.Sleep(r.TimeoutInterval) // wait for message sending
+	select {
+	case <-r.MessageEventChan:
+		t.Fatal("should get only one timeout message from a uncommitted instance")
+	default:
+	}
+}
+
+// test multiple timeouts
+func TestTimeout2(t *testing.T) {
+	r := commonTestlibExampleReplica()
+	for i, inst := range r.InstanceMatrix {
+		inst[1023] = commonTestlibExampleAcceptedInstance()
+		inst[1025] = commonTestlibExampleAcceptedInstance()
+		inst[1026] = commonTestlibExampleCommittedInstance()
+		inst[1027] = commonTestlibExampleAcceptedInstance()
+		r.MaxInstanceNum[i] = 1027
+		r.ExecutedUpTo[i] = 1022
+	}
+	time.Sleep(2 * r.TimeoutInterval)
+	go r.checkTimeout()
+
+	// should receive 10 timeout message in total
+	for i := 0; i < int(r.Size); i++ {
+		for j := 1023; j <= 1027; j++ { // include a checkpoint
+			time.Sleep(r.TimeoutInterval) // wait for message sending
+			if j%2 == 0 {
+				continue
+			}
+			select {
+			case msg := <-r.MessageEventChan:
+				assert.Equal(t, msg, &MessageEvent{
+					From: uint8(i),
+					Message: &data.PrepareTrigger{
+						ReplicaId:  uint8(i),
+						InstanceId: uint64(j),
+					},
+				})
+			default:
+				t.Fatal("should get timeout messages")
+			}
+		}
+	}
+	time.Sleep(r.TimeoutInterval) // wait for message sending
+	select {
+	case <-r.MessageEventChan:
+		t.Fatal("shouldn't get more timeout messages")
+	default:
+	}
 }

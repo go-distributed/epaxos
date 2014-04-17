@@ -45,7 +45,6 @@ const (
 	conflictNotFound       = 0
 	epochStart             = 1
 	executeInterval        = 5 * time.Millisecond
-	timeoutInterval        = 5 * time.Second
 )
 
 // actions
@@ -61,12 +60,14 @@ const (
 // ****************************
 
 type Replica struct {
-	Id               uint8
-	Size             uint8
-	MaxInstanceNum   []uint64 // the highest instance number seen for each replica
-	ProposeNum       uint64
-	ProposeChan      chan data.Command
-	BatchInterval    time.Duration
+	Id              uint8
+	Size            uint8
+	MaxInstanceNum  []uint64 // the highest instance number seen for each replica
+	ProposeNum      uint64
+	ProposeChan     chan data.Command
+	BatchInterval   time.Duration
+	TimeoutInterval time.Duration
+
 	CheckpointCycle  uint64
 	ExecutedUpTo     []uint64
 	InstanceMatrix   [][]*Instance
@@ -87,6 +88,7 @@ type Param struct {
 	StateMachine    epaxos.StateMachine
 	CheckpointCycle uint64
 	BatchInterval   time.Duration
+	TimeoutInterval time.Duration
 }
 
 type MessageEvent struct {
@@ -94,36 +96,50 @@ type MessageEvent struct {
 	Message Message
 }
 
-//func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
-func New(param *Param) (r *Replica) {
-	replicaId := param.ReplicaId
-	size := param.Size
-	sm := param.StateMachine
-	cycle := uint64(1024)
-
-	if size%2 == 0 {
+func verifyparam(param *Param) {
+	// TODO: replicaID, uuid
+	if param.Size == 0 {
+		param.Size = 3
+	}
+	if param.Size%2 == 0 {
 		// TODO: epaxos replica error
 		panic("size should be an odd number")
 	}
+	if param.CheckpointCycle == 0 {
+		param.CheckpointCycle = 1024
+	}
+	if param.BatchInterval == 0 {
+		param.BatchInterval = time.Millisecond * 50
+	}
+	if param.TimeoutInterval == 0 {
+		param.TimeoutInterval = time.Millisecond * 50
+	}
+}
+
+//func New(replicaId, size uint8, sm epaxos.StateMachine) (r *Replica) {
+func New(param *Param) (r *Replica) {
+	verifyparam(param)
 	r = &Replica{
-		Id:               replicaId,
-		Size:             size,
-		MaxInstanceNum:   make([]uint64, size),
+		Id:               param.ReplicaId,
+		Size:             param.Size,
+		MaxInstanceNum:   make([]uint64, param.Size),
 		ProposeNum:       1, // instance.id start from 1
 		ProposeChan:      make(chan data.Command),
-		BatchInterval:    5 * time.Millisecond,
-		CheckpointCycle:  cycle,
-		ExecutedUpTo:     make([]uint64, size),
-		InstanceMatrix:   make([][]*Instance, size),
-		StateMachine:     sm,
+		BatchInterval:    param.BatchInterval,
+		TimeoutInterval:  param.TimeoutInterval,
+		CheckpointCycle:  param.CheckpointCycle,
+		ExecutedUpTo:     make([]uint64, param.Size),
+		InstanceMatrix:   make([][]*Instance, param.Size),
+		StateMachine:     param.StateMachine,
 		Epoch:            epochStart,
 		MessageEventChan: make(chan *MessageEvent),
 		sccStack:         list.New(),
 	}
 
-	for i := uint8(0); i < size; i++ {
+	for i := uint8(0); i < param.Size; i++ {
 		r.InstanceMatrix[i] = make([]*Instance, defaultInstancesLength)
 		r.MaxInstanceNum[i] = conflictNotFound
+		r.ExecutedUpTo[i] = conflictNotFound
 	}
 
 	return r
@@ -139,7 +155,7 @@ func (r *Replica) Start() {
 
 func (r *Replica) timeoutLoop() {
 	for {
-		time.Sleep(timeoutInterval)
+		time.Sleep(r.TimeoutInterval)
 		r.checkTimeout()
 	}
 }
@@ -148,8 +164,8 @@ func (r *Replica) checkTimeout() {
 	for i, instance := range r.InstanceMatrix {
 		// from executeupto to max, test timestamp,
 		// if timeout, then send prepare
-		for j := r.ExecutedUpTo[i]; j < r.MaxInstanceNum[i]; i++ {
-			if r.IsCheckpoint(j) {
+		for j := r.ExecutedUpTo[i] + 1; j <= r.MaxInstanceNum[i]; j++ {
+			if r.IsCheckpoint(j) { // [*]Note: the first instance is also a checkpoint
 				continue
 			}
 			if instance[j].isTimeout() {

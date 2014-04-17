@@ -105,6 +105,7 @@ func NewInstance(replica *Replica, rowId uint8, instanceId uint64) (i *Instance)
 		recoveryInfo: NewRecoveryInfo(),
 		ballot:       data.NewBallot(0, 0, 0),
 		status:       nilStatus,
+		lastTouched:  time.Now(),
 	}
 	return i
 }
@@ -1083,7 +1084,7 @@ func (i *Instance) inactiveDuaration() time.Duration {
 // check if this instance is timeout
 func (i *Instance) isTimeout() bool {
 	if i.isBeforeStatus(committed) &&
-		i.inactiveDuaration() > timeoutInterval {
+		i.inactiveDuaration() > i.replica.TimeoutInterval {
 		return true
 	}
 	return false

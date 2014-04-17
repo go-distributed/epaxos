@@ -137,6 +137,7 @@ func commonTestlibCloneInstance(inst *Instance) *Instance {
 		rowId:        inst.rowId,
 		id:           inst.id,
 		executed:     inst.executed,
+		lastTouched:  inst.lastTouched,
 	}
 }
 
@@ -2981,6 +2982,48 @@ func TestMakeRecoveryDecision(t *testing.T) {
 
 	i.recoveryInfo.status = nilStatus - 1
 	assert.Panics(t, func() { i.makeRecoveryDecision() })
+}
+
+func TestHandlePrepareTrigger(t *testing.T) {
+	// TODO: enterpreparing
+	i := commonTestlibExampleNilStatusInstance()
+	act, msg := i.handlePrepareTrigger(&data.PrepareTrigger{})
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     i.ballot,
+	})
+
+	i = commonTestlibExamplePreAcceptedInstance()
+	act, msg = i.handlePrepareTrigger(&data.PrepareTrigger{})
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     i.ballot,
+	})
+
+	i = commonTestlibExampleAcceptedInstance()
+	act, msg = i.handlePrepareTrigger(&data.PrepareTrigger{})
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     i.ballot,
+	})
+
+	i = commonTestlibExamplePreparingInstance()
+	act, msg = i.handlePrepareTrigger(&data.PrepareTrigger{})
+	assert.Equal(t, act, broadcastAction)
+	assert.Equal(t, msg, &data.Prepare{
+		ReplicaId:  i.rowId,
+		InstanceId: i.id,
+		Ballot:     i.ballot,
+	})
+
+	i = commonTestlibExampleCommittedInstance()
+	assert.Panics(t, func() { i.handlePrepareTrigger(&data.PrepareTrigger{}) })
 }
 
 // Tests for getters
