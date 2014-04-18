@@ -13,7 +13,6 @@ type Accept struct {
 }
 
 type AcceptReply struct {
-	Ok         bool
 	ReplicaId  uint8
 	InstanceId uint64
 	Ballot     *Ballot

@@ -341,7 +341,7 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 		panic("")
 	}
 
-	if i.isAtStatus(committed) && action == noAction {
+	if action == noAction {
 		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v, ballot = [%v]\n\n\n",
 			r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
 	} else {

@@ -20,7 +20,6 @@ type PreAcceptOk struct {
 }
 
 type PreAcceptReply struct {
-	Ok         bool
 	ReplicaId  uint8
 	InstanceId uint64
 	Deps       Dependencies

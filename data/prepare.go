@@ -11,7 +11,6 @@ type Prepare struct {
 }
 
 type PrepareReply struct {
-	Ok         bool
 	ReplicaId  uint8
 	InstanceId uint64
 	Status     uint8
@@ -60,16 +59,6 @@ func (p *PrepareReply) Instance() uint64 {
 }
 
 func (p *PrepareReply) String() string {
-	return fmt.Sprintf("PrepareReply, Instance[%v][%v], Ballot[%v]",
-		p.ReplicaId, p.InstanceId, p.Ballot.String())
+	return fmt.Sprintf("PrepareReply, Instance[%v][%v], Ballot[%v], Original Ballot[%v]",
+		p.ReplicaId, p.InstanceId, p.Ballot.String(), p.OriginalBallot.String())
 }
-
-
-
-
-
-
-
-
-
-
