@@ -53,10 +53,10 @@ func TestDependenciesClone(t *testing.T) {
 	assert.Equal(t, self, other)
 }
 
-func TestDependenciesNilPanic(t *testing.T) {
+func TestDependenciesNilClone(t *testing.T) {
 	var d Dependencies
 	d = nil
-	assert.Panics(t, func() { d.Clone() })
+	assert.Nil(t, d.Clone())
 }
 func TestDependenciesSameAs(t *testing.T) {
 	self := make(Dependencies, 5)
