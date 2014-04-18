@@ -13,9 +13,10 @@ package replica
 
 import (
 	"container/list"
-	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"sort"
 	"time"
@@ -87,6 +88,7 @@ type Param struct {
 
 type MessageEvent struct {
 	From    uint8
+	MsgType uint8
 	Message Message
 }
 
@@ -143,26 +145,43 @@ func (r *Replica) Start() error {
 		return err
 	}
 
-	fmt.Println("Listening on port", r.Addrs[r.Id])
+	log.Println("Listening on port", r.Addrs[r.Id])
 	go func() {
 		for {
 			data := make([]byte, 1024*16)
 			rlen, err := sock.Read(data)
 			if err != nil {
-				glog.Errorln("listener is closed:", err)
+				log.Println("listener is closed:", err)
 				return
 			}
 
 			go func(b []byte, n int) {
-				msgEvent := new(MessageEvent)
-				json.Unmarshal(b[:n], msgEvent)
+				msg, err := messageProto(b[1])
+				if err != nil {
+					log.Println(err)
+					return
+				}
+
+				err = xml.Unmarshal(b[2:n], msg)
+				if err != nil {
+					log.Println("Unmarshal", err)
+					return
+				}
+
+				msgEvent := &MessageEvent{
+					From:    b[0],
+					MsgType: b[1],
+					Message: msg,
+				}
+				log.Printf("%v\n", msgEvent)
+
 				r.MessageEventChan <- msgEvent
 			}(data, rlen)
 		}
 	}()
 
 	go r.eventLoop()
-	//go r.executeLoop()
+	go r.executeLoop()
 	go r.proposeLoop()
 	return nil
 }
@@ -217,7 +236,8 @@ func (r *Replica) BatchPropose(batchedCmds data.Commands) {
 	copy(cmds, batchedCmds)
 
 	mevent := &MessageEvent{
-		From: r.Id,
+		From:    r.Id,
+		MsgType: data.ProposeMsg,
 		Message: &data.Propose{
 			ReplicaId:  r.Id,
 			InstanceId: r.ProposeNum,
@@ -484,6 +504,8 @@ func (r *Replica) executeList() error {
 		}
 		// return results from state machine are not being used currently
 
+		// TODO: the results from statemachine should be relayed to callback
+		//      of some client function
 		_, err := r.StateMachine.Execute(cmdsBuffer)
 		if err != nil {
 			return err

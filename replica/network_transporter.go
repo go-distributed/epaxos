@@ -1,11 +1,11 @@
 package replica
 
 import (
-	"encoding/json"
+	"bufio"
+	"encoding/xml"
+	"log"
 	"math/rand"
 	"net"
-
-	"github.com/golang/glog"
 )
 
 type NetworkTransporter struct {
@@ -13,6 +13,7 @@ type NetworkTransporter struct {
 	Self       uint8
 	FastQuorum uint8
 	All        uint8
+	Conns      []*net.UDPConn
 }
 
 func NewNetworkTransporter(addrStrs []string,
@@ -20,9 +21,19 @@ func NewNetworkTransporter(addrStrs []string,
 
 	var err error
 	addrs := make([]*net.UDPAddr, len(addrStrs))
+	conns := make([]*net.UDPConn, len(addrStrs))
 
 	for i := range addrs {
+		if uint8(i) == self {
+			continue
+		}
+
 		addrs[i], err = net.ResolveUDPAddr("udp", addrStrs[i])
+		if err != nil {
+			return nil, err
+		}
+
+		conns[i], err = net.DialUDP("udp", nil, addrs[i])
 		if err != nil {
 			return nil, err
 		}
@@ -33,27 +44,30 @@ func NewNetworkTransporter(addrStrs []string,
 		Self:       self,
 		FastQuorum: size - 2,
 		All:        size - 1,
+		Conns:      conns,
 	}
 	return nt, nil
 }
 
 func (nt *NetworkTransporter) Send(to uint8, msg Message) {
 	go func() {
-		addr := nt.Addrs[to]
-		msgEvent := &MessageEvent{nt.Self, msg}
-		data, err := json.Marshal(msgEvent)
-		if err != nil {
-			glog.Errorln("Marshal:", err)
+		conn := nt.Conns[to]
+		if conn == nil {
+			log.Println("shouldn't sent to ", to)
 			return
 		}
 
-		conn, err := net.DialUDP("udp", nil, addr)
+		b, err := xml.Marshal(msg)
 		if err != nil {
-			glog.Errorln("Transporter send:", err)
+			log.Println("Marshal:", err)
 			return
 		}
 
-		conn.Write(data)
+		bw := bufio.NewWriter(conn)
+		bw.WriteByte(nt.Self)
+		bw.WriteByte(msg.Type())
+		bw.Write(b)
+		bw.Flush()
 	}()
 }
 
