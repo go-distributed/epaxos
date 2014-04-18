@@ -113,7 +113,7 @@ func livetestlibLogConsistent(t *testing.T, replicas ...*replica.Replica) bool {
 // Test Scenario: Non-conflict commands, 1 proposer
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica1ProposerNoConflict(t *testing.T) {
-	maxInstance := 1024 * 4
+	maxInstance := 1024 * 48
 	allCmds := make([]data.Commands, maxInstance)
 
 	nodes := livetestlibSetupCluster(3)
@@ -123,7 +123,8 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 		go nodes[0].BatchPropose(cmds) // to disable batch
 		allCmds[i] = cmds
 	}
-	time.Sleep(2000 * time.Millisecond)
+	fmt.Println("Wait 5000 millis for completion")
+	time.Sleep(5000 * time.Millisecond)
 
 	// test log consistency
 	assert.True(t, livetestlibLogConsistent(t, nodes...))

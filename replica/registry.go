@@ -20,6 +20,7 @@ func init() {
 	registerMsgType(data.CommitMsg, data.Commit{})
 	registerMsgType(data.PrepareMsg, data.Prepare{})
 	registerMsgType(data.PrepareReplyMsg, data.PrepareReply{})
+	registerMsgType(data.TimeoutMsg, data.Timeout{})
 }
 
 func registerMsgType(typ uint8, msg interface{}) {
