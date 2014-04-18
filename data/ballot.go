@@ -1,5 +1,9 @@
 package data
 
+import (
+	"fmt"
+)
+
 const (
 	// Ballot has a format like:
 	// Epoch   | Number  | ReplicaId
@@ -105,4 +109,8 @@ func (b *Ballot) Clone() *Ballot {
 		b.number,
 		b.replicaId,
 	}
+}
+
+func (b *Ballot) String() string {
+	return fmt.Sprintf("%v.%v.%v", b.epoch, b.number, b.replicaId)
 }

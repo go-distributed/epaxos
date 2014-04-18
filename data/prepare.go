@@ -40,7 +40,7 @@ func (p *Prepare) Instance() uint64 {
 }
 
 func (p *Prepare) String() string {
-	return fmt.Sprintf("Prepare, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
+	return fmt.Sprintf("Prepare, Instance[%v][%v], Ballot[%v]", p.ReplicaId, p.InstanceId, p.Ballot.String())
 }
 
 func (p *PrepareReply) Type() uint8 {
@@ -60,5 +60,16 @@ func (p *PrepareReply) Instance() uint64 {
 }
 
 func (p *PrepareReply) String() string {
-	return fmt.Sprintf("PrepareReply, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
+	return fmt.Sprintf("PrepareReply, Instance[%v][%v], Ballot[%v]",
+		p.ReplicaId, p.InstanceId, p.Ballot.String())
 }
+
+
+
+
+
+
+
+
+
+
