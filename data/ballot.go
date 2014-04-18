@@ -1,5 +1,9 @@
 package data
 
+import (
+	"fmt"
+)
+
 const (
 	// Ballot has a format like:
 	// Epoch   | Number  | ReplicaId
@@ -72,8 +76,13 @@ func (b *Ballot) Epoch() uint32 {
 func (b *Ballot) Number() uint64 {
 	return b.number
 }
+
 func (b *Ballot) SetNumber(number uint64) {
 	b.number = number
+}
+
+func (b *Ballot) ReplicaId() uint8 {
+	return b.replicaId
 }
 
 func (b *Ballot) IncNumber() {
@@ -105,4 +114,8 @@ func (b *Ballot) Clone() *Ballot {
 		b.number,
 		b.replicaId,
 	}
+}
+
+func (b *Ballot) String() string {
+	return fmt.Sprintf("%v.%v.%v", b.epoch, b.number, b.replicaId)
 }

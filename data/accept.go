@@ -13,7 +13,6 @@ type Accept struct {
 }
 
 type AcceptReply struct {
-	Ok         bool
 	ReplicaId  uint8
 	InstanceId uint64
 	Ballot     *Ballot
@@ -36,7 +35,7 @@ func (p *Accept) Instance() uint64 {
 }
 
 func (p *Accept) String() string {
-	return fmt.Sprintf("Accept, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
+	return fmt.Sprintf("Accept, Instance[%v][%v], Ballot[%v]", p.ReplicaId, p.InstanceId, p.Ballot.String())
 }
 
 func (a *AcceptReply) Type() uint8 {
@@ -56,5 +55,5 @@ func (p *AcceptReply) Instance() uint64 {
 }
 
 func (p *AcceptReply) String() string {
-	return fmt.Sprintf("AcceptReply, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
+	return fmt.Sprintf("AcceptReply, Instance[%v][%v], Ballot[%v]", p.ReplicaId, p.InstanceId, p.Ballot.String())
 }
