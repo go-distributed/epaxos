@@ -16,6 +16,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sort"
@@ -45,7 +46,6 @@ const (
 	defaultInstancesLength = 1024 * 64
 	conflictNotFound       = 0
 	epochStart             = 1
-	executeInterval        = 5 * time.Millisecond
 )
 
 // actions
@@ -70,6 +70,7 @@ type Replica struct {
 	ProposeChan     chan data.Command
 	BatchInterval   time.Duration
 	TimeoutInterval time.Duration
+	stop            chan struct{}
 
 	CheckpointCycle  uint64
 	ExecutedUpTo     []uint64
@@ -77,6 +78,7 @@ type Replica struct {
 	StateMachine     epaxos.StateMachine
 	Epoch            uint32
 	MessageEventChan chan *MessageEvent
+	sock             io.ReadWriteCloser
 	Addrs            []string
 	Transporter
 
@@ -84,6 +86,11 @@ type Replica struct {
 	sccStack   *list.List
 	sccResults [][]*Instance
 	sccIndex   int
+
+	// tickers
+	executeTicker <-chan time.Time
+	proposeTicker <-chan time.Time
+	timeoutTicker <-chan time.Time
 }
 
 type Param struct {
@@ -93,6 +100,7 @@ type Param struct {
 	CheckpointCycle uint64
 	BatchInterval   time.Duration
 	TimeoutInterval time.Duration
+	ExecuteInterval time.Duration
 	Addrs           []string
 }
 
@@ -119,6 +127,9 @@ func verifyparam(param *Param) error {
 	}
 	if param.TimeoutInterval == 0 {
 		param.TimeoutInterval = time.Millisecond * 50
+	}
+	if param.ExecuteInterval == 0 {
+		param.ExecuteInterval = time.Millisecond * 50
 	}
 	if param.Addrs == nil {
 		param.Addrs = make([]string, param.Size)
@@ -150,6 +161,11 @@ func New(param *Param) (*Replica, error) {
 		MessageEventChan: make(chan *MessageEvent),
 		sccStack:         list.New(),
 		Addrs:            param.Addrs,
+
+		executeTicker: time.Tick(param.ExecuteInterval),
+		proposeTicker: time.Tick(param.BatchInterval),
+		timeoutTicker: time.Tick(param.TimeoutInterval),
+		stop:          make(chan struct{}),
 	}
 
 	for i := uint8(0); i < param.Size; i++ {
@@ -173,46 +189,14 @@ func (r *Replica) Start() error {
 		return err
 	}
 
-	sock, err := net.ListenUDP("udp", addr)
+	r.sock, err = net.ListenUDP("udp", addr)
 	if err != nil {
 		return err
 	}
 
 	log.Println("Listening on port", r.Addrs[r.Id])
-	go func() {
-		for {
-			data := make([]byte, 1024*16)
-			rlen, err := sock.Read(data)
-			if err != nil {
-				log.Println("listener is closed:", err)
-				return
-			}
 
-			go func(b []byte, n int) {
-				msg, err := messageProto(b[1])
-				if err != nil {
-					log.Println(err)
-					return
-				}
-
-				err = xml.Unmarshal(b[2:n], msg)
-				if err != nil {
-					log.Println("Unmarshal", err)
-					return
-				}
-
-				msgEvent := &MessageEvent{
-					From:    b[0],
-					MsgType: b[1],
-					Message: msg,
-				}
-				log.Printf("%v\n", msgEvent)
-
-				r.MessageEventChan <- msgEvent
-			}(data, rlen)
-		}
-	}()
-
+	go r.recvLoop()
 	go r.eventLoop()
 	go r.executeLoop()
 	go r.proposeLoop()
@@ -220,10 +204,61 @@ func (r *Replica) Start() error {
 	return nil
 }
 
+func (r *Replica) Stop() {
+	close(r.stop)
+	r.sock.Close()
+}
+
+// TODO: move to transporter
+func (r *Replica) recvLoop() {
+	data := make([]byte, 1024*16) // TODO: hard code
+
+	for {
+		select {
+		case <-r.stop:
+			return
+		default:
+		}
+
+		rlen, err := r.sock.Read(data)
+		if err != nil {
+			log.Println("listener is closed:", err)
+			return
+		}
+
+		go func(b []byte, n int) {
+			msg, err := messageProto(b[1])
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			err = xml.Unmarshal(b[2:n], msg)
+			if err != nil {
+				log.Println("Unmarshal", err)
+				return
+			}
+
+			msgEvent := &MessageEvent{
+				From:    b[0],
+				MsgType: b[1],
+				Message: msg,
+			}
+			log.Printf("%v\n", msgEvent)
+
+			r.MessageEventChan <- msgEvent
+		}(data, rlen)
+	}
+}
+
 func (r *Replica) timeoutLoop() {
 	for {
-		time.Sleep(r.TimeoutInterval)
-		r.checkTimeout()
+		select {
+		case <-r.stop:
+			return
+		case <-r.timeoutTicker:
+			r.checkTimeout()
+		}
 	}
 }
 
@@ -257,6 +292,8 @@ func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *MessageEvent {
 func (r *Replica) eventLoop() {
 	for {
 		select {
+		case <-r.stop:
+			return
 		case mevent := <-r.MessageEventChan:
 			r.dispatch(mevent)
 		}
@@ -265,22 +302,26 @@ func (r *Replica) eventLoop() {
 
 func (r *Replica) executeLoop() {
 	for {
-		time.Sleep(executeInterval)
-		// execution of committed instances
-		r.findAndExecute()
+		select {
+		case <-r.stop:
+			return
+		case <-r.executeTicker:
+			// execution of committed instances
+			r.findAndExecute()
+		}
 	}
 }
 
 func (r *Replica) proposeLoop() {
-	proposeTicker := time.Tick(r.BatchInterval)
-
-	bufferedCmds := make([]data.Command, 0)
+	bufferedCmds := make([]data.Command, 0) // hardcode
 
 	for {
 		select {
+		case <-r.stop:
+			return
 		case cmd := <-r.ProposeChan:
 			bufferedCmds = append(bufferedCmds, cmd)
-		case <-proposeTicker:
+		case <-r.proposeTicker:
 			if len(bufferedCmds) == 0 {
 				break
 			}
