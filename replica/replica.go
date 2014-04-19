@@ -158,7 +158,7 @@ func New(param *Param) (*Replica, error) {
 		InstanceMatrix:   make([][]*Instance, param.Size),
 		StateMachine:     param.StateMachine,
 		Epoch:            epochStart,
-		MessageEventChan: make(chan *MessageEvent),
+		MessageEventChan: make(chan *MessageEvent, 1024),
 		sccStack:         list.New(),
 		Addrs:            param.Addrs,
 
@@ -270,6 +270,11 @@ func (r *Replica) checkTimeout() {
 			if r.IsCheckpoint(j) { // [*]Note: the first instance is also a checkpoint
 				continue
 			}
+
+			if instance[j] == nil {
+				continue
+			}
+
 			if instance[j].isTimeout() {
 				r.MessageEventChan <- r.makeTimeout(uint8(i), j)
 			}

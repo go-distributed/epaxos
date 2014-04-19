@@ -82,6 +82,16 @@ func livetestlibLogCmpForTwo(t *testing.T, a, b *replica.Replica, row int) bool 
 			continue
 		}
 
+		if a.InstanceMatrix[row][i].StatusString() != "Committed" {
+			t.Logf("WARNING: Instance is not committed for replica[%d]:Instance[%d][%d]",
+				a.Id, row, i)
+		}
+
+		if b.InstanceMatrix[row][i].StatusString() != "Committed" {
+			t.Logf("WARNING: Instance is not committed for replica[%d]:Instance[%d][%d]",
+				b.Id, row, i)
+		}
+
 		ca := a.InstanceMatrix[row][i].Commands()
 		cb := b.InstanceMatrix[row][i].Commands()
 		if !reflect.DeepEqual(ca, cb) {
@@ -184,9 +194,13 @@ func Test2ProposerConflict(t *testing.T) {
 		deps1 := nodes[0].InstanceMatrix[0][i].Dependencies()
 		deps2 := nodes[0].InstanceMatrix[1][i].Dependencies()
 		pos := uint64(i)
-		if !assert.Equal(t, deps1[1], pos) ||
-			!assert.Equal(t, deps2[0], pos) {
-			t.Fatal("Incorrect conflict")
+
+		if !reflect.DeepEqual(deps1[1], pos) {
+			t.Fatal("Incorrect dependencies", i, deps1)
+		}
+
+		if !reflect.DeepEqual(deps2[0], pos) {
+			t.Fatal("Incorrect dependencies", i, deps2)
 		}
 	}
 }
@@ -217,10 +231,16 @@ func Test3ProposerConflict(t *testing.T) {
 		deps[2] = nodes[0].InstanceMatrix[2][i].Dependencies()
 		pos := uint64(i)
 
-		if !assert.Equal(t, deps[0][1], pos) ||
-			!assert.Equal(t, deps[1][0], pos) ||
-			!assert.Equal(t, deps[2][0], pos) {
-			t.Fatal("Incorrect conflict")
+		if !reflect.DeepEqual(deps[0][1], pos) {
+			t.Fatal("Incorrect dependencies", i, deps[0])
+		}
+
+		if !reflect.DeepEqual(deps[1][0], pos) {
+			t.Fatal("Incorrect dependencies", i, deps[1])
+		}
+
+		if !reflect.DeepEqual(deps[2][0], pos) {
+			t.Fatal("Incorrect dependencies", i, deps[2])
 		}
 	}
 }
