@@ -123,7 +123,6 @@ func commonTestlibCloneInstance(inst *Instance) *Instance {
 			deps:           ir.deps.Clone(),
 			status:         ir.status,
 			formerStatus:   ir.formerStatus,
-			formerBallot:   ir.formerBallot,
 		}
 	}
 
@@ -1694,7 +1693,6 @@ func TestPreparingProcessWithHandlePrepare(t *testing.T) {
 	smallerBallot := inst.replica.makeInitialBallot()
 	largerBallot := smallerBallot.IncNumClone()
 
-	inst.recoveryInfo.formerBallot = smallerBallot
 	inst.recoveryInfo.formerStatus = nilStatus
 	inst.ballot = smallerBallot
 

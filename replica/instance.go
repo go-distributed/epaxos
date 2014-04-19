@@ -90,7 +90,6 @@ type RecoveryInfo struct {
 	deps         data.Dependencies
 	status       uint8
 	formerStatus uint8
-	formerBallot *data.Ballot
 }
 
 // ****************************
@@ -119,8 +118,7 @@ func NewInstanceInfo() *InstanceInfo {
 
 func NewRecoveryInfo() *RecoveryInfo {
 	return &RecoveryInfo{
-		ballot:       data.NewBallot(0, 0, 0),
-		formerBallot: data.NewBallot(0, 0, 0),
+		ballot: data.NewBallot(0, 0, 0),
 	}
 }
 
@@ -168,9 +166,18 @@ func (i *Instance) initRecoveryInfo() {
 	ir.replyCount = 0
 	ir.cmds = i.cmds.Clone()
 	ir.deps = i.deps.Clone()
-	ir.status = i.status
-	ir.formerStatus = i.status
-	ir.formerBallot = i.ballot.Clone()
+
+	if i.isAtStatus(preparing) {
+		// from preparing to preparing, we should extend the former status
+		ir.status = ir.formerStatus
+	} else {
+		ir.status = i.status
+	}
+
+	if i.status != preparing {
+		// from preparing to preparing, we should keep the former status
+		ir.formerStatus = i.status
+	}
 	ir.ballot = i.ballot.Clone()
 
 	// preacceptcount is used to count N/2 identical initial preaccepts.
@@ -863,6 +870,7 @@ func (i *Instance) loadRecoveryInfo() {
 
 func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
 	i.loadRecoveryInfo()
+	action = broadcastAction
 
 	ir := i.recoveryInfo
 	// determine status
@@ -883,15 +891,15 @@ func (i *Instance) makeRecoveryDecision() (action uint8, msg Message) {
 		} else {
 			i.enterPreAcceptedAsSender()
 			msg = i.makePreAccept()
+			// TODO: action here?
 		}
 	case nilStatus:
 		// get ready to send Accept for No-op
 		i.enterAcceptedAsSender()
 		msg = i.makeAccept()
 	default:
-		panic("")
+		panic(ir.status)
 	}
-	action = broadcastAction
 	return
 }
 
