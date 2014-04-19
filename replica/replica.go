@@ -279,7 +279,7 @@ func (r *Replica) checkTimeout() {
 
 func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *MessageEvent {
 	return &MessageEvent{
-		From: rowId,
+		From: r.Id,
 		Message: &data.Timeout{
 			ReplicaId:  rowId,
 			InstanceId: instanceId,
@@ -647,7 +647,7 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 		}
 
 		neighbor := r.InstanceMatrix[iSpace][dep]
-		if !neighbor.isAtStatus(committed) {
+		if neighbor == nil || !neighbor.isAtStatus(committed) {
 			return false
 		}
 

@@ -620,7 +620,7 @@ func TestTimeout2(t *testing.T) {
 			select {
 			case msg := <-r.MessageEventChan:
 				assert.Equal(t, msg, &MessageEvent{
-					From: uint8(i),
+					From: r.Id,
 					Message: &data.Timeout{
 						ReplicaId:  uint8(i),
 						InstanceId: uint64(j),
