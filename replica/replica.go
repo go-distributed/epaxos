@@ -16,6 +16,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sort"
@@ -27,7 +28,12 @@ import (
 	"github.com/go-distributed/epaxos/data"
 )
 
+// #if test
 var v1Log = glog.V(0)
+
+// #else
+// var v1Log = glog.V(1)
+// #end
 
 var (
 	errConflictsNotFullyResolved = errors.New("Conflicts not fully resolved")
@@ -40,7 +46,6 @@ const (
 	defaultInstancesLength = 1024 * 64
 	conflictNotFound       = 0
 	epochStart             = 1
-	executeInterval        = 5 * time.Millisecond
 )
 
 // actions
@@ -51,23 +56,29 @@ const (
 	broadcastAction
 )
 
+const defaultStartPort = 8080
+
 // ****************************
 // ***** TYPE STRUCT **********
 // ****************************
 
 type Replica struct {
-	Id               uint8
-	Size             uint8
-	MaxInstanceNum   []uint64 // the highest instance number seen for each replica
-	ProposeNum       uint64
-	ProposeChan      chan data.Command
-	BatchInterval    time.Duration
+	Id              uint8
+	Size            uint8
+	MaxInstanceNum  []uint64 // the highest instance number seen for each replica
+	ProposeNum      uint64
+	ProposeChan     chan data.Command
+	BatchInterval   time.Duration
+	TimeoutInterval time.Duration
+	stop            chan struct{}
+
 	CheckpointCycle  uint64
 	ExecutedUpTo     []uint64
 	InstanceMatrix   [][]*Instance
 	StateMachine     epaxos.StateMachine
 	Epoch            uint32
 	MessageEventChan chan *MessageEvent
+	sock             io.ReadWriteCloser
 	Addrs            []string
 	Transporter
 
@@ -75,15 +86,22 @@ type Replica struct {
 	sccStack   *list.List
 	sccResults [][]*Instance
 	sccIndex   int
+
+	// tickers
+	executeTicker <-chan time.Time
+	proposeTicker <-chan time.Time
+	timeoutTicker <-chan time.Time
 }
 
 type Param struct {
-	Addrs        []string
-	ReplicaId    uint8
-	Size         uint8
-	StateMachine epaxos.StateMachine
-	//CheckpointCycle uint64
-	//BatchInterval   time.Duration
+	ReplicaId       uint8
+	Size            uint8
+	StateMachine    epaxos.StateMachine
+	CheckpointCycle uint64
+	BatchInterval   time.Duration
+	TimeoutInterval time.Duration
+	ExecuteInterval time.Duration
+	Addrs           []string
 }
 
 type MessageEvent struct {
@@ -92,39 +110,70 @@ type MessageEvent struct {
 	Message Message
 }
 
-func New(param *Param) (*Replica, error) {
-	replicaId := param.ReplicaId
-	size := param.Size
-	sm := param.StateMachine
-	cycle := uint64(1024)
-
-	if size%2 == 0 {
-		return nil, fmt.Errorf("Use odd number as quorum size")
+func verifyparam(param *Param) error {
+	// TODO: replicaID, uuid
+	if param.Size == 0 {
+		param.Size = 3
 	}
+	if param.Size%2 == 0 {
+		// TODO: epaxos replica error
+		return fmt.Errorf("Use odd number as quorum size")
+	}
+	if param.CheckpointCycle == 0 {
+		param.CheckpointCycle = 1024
+	}
+	if param.BatchInterval == 0 {
+		param.BatchInterval = time.Millisecond * 50
+	}
+	if param.TimeoutInterval == 0 {
+		param.TimeoutInterval = time.Millisecond * 50
+	}
+	if param.ExecuteInterval == 0 {
+		param.ExecuteInterval = time.Millisecond * 50
+	}
+	if param.Addrs == nil {
+		param.Addrs = make([]string, param.Size)
+		for i := 0; i < int(param.Size); i++ {
+			param.Addrs[i] = fmt.Sprintf("localhost:%d", defaultStartPort+i)
+		}
+	}
+	return nil
+}
 
+func New(param *Param) (*Replica, error) {
+	err := verifyparam(param)
+	if err != nil {
+		return nil, err
+	}
 	r := &Replica{
-		Id:               replicaId,
-		Size:             size,
-		MaxInstanceNum:   make([]uint64, size),
+		Id:               param.ReplicaId,
+		Size:             param.Size,
+		MaxInstanceNum:   make([]uint64, param.Size),
 		ProposeNum:       1, // instance.id start from 1
 		ProposeChan:      make(chan data.Command),
-		BatchInterval:    5 * time.Millisecond,
-		CheckpointCycle:  cycle,
-		ExecutedUpTo:     make([]uint64, size),
-		InstanceMatrix:   make([][]*Instance, size),
-		StateMachine:     sm,
+		BatchInterval:    param.BatchInterval,
+		TimeoutInterval:  param.TimeoutInterval,
+		CheckpointCycle:  param.CheckpointCycle,
+		ExecutedUpTo:     make([]uint64, param.Size),
+		InstanceMatrix:   make([][]*Instance, param.Size),
+		StateMachine:     param.StateMachine,
 		Epoch:            epochStart,
 		MessageEventChan: make(chan *MessageEvent),
 		sccStack:         list.New(),
 		Addrs:            param.Addrs,
+
+		executeTicker: time.Tick(param.ExecuteInterval),
+		proposeTicker: time.Tick(param.BatchInterval),
+		timeoutTicker: time.Tick(param.TimeoutInterval),
+		stop:          make(chan struct{}),
 	}
 
-	for i := uint8(0); i < size; i++ {
+	for i := uint8(0); i < param.Size; i++ {
 		r.InstanceMatrix[i] = make([]*Instance, defaultInstancesLength)
 		r.MaxInstanceNum[i] = conflictNotFound
+		r.ExecutedUpTo[i] = conflictNotFound
 	}
 
-	var err error
 	r.Transporter, err = NewNetworkTransporter(param.Addrs, r.Id, r.Size)
 	if err != nil {
 		return nil, err
@@ -140,58 +189,111 @@ func (r *Replica) Start() error {
 		return err
 	}
 
-	sock, err := net.ListenUDP("udp", addr)
+	r.sock, err = net.ListenUDP("udp", addr)
 	if err != nil {
 		return err
 	}
 
 	log.Println("Listening on port", r.Addrs[r.Id])
-	go func() {
-		for {
-			data := make([]byte, 1024*16)
-			rlen, err := sock.Read(data)
-			if err != nil {
-				log.Println("listener is closed:", err)
-				return
-			}
 
-			go func(b []byte, n int) {
-				msg, err := messageProto(b[1])
-				if err != nil {
-					log.Println(err)
-					return
-				}
-
-				err = xml.Unmarshal(b[2:n], msg)
-				if err != nil {
-					log.Println("Unmarshal", err)
-					return
-				}
-
-				msgEvent := &MessageEvent{
-					From:    b[0],
-					MsgType: b[1],
-					Message: msg,
-				}
-				log.Printf("%v\n", msgEvent)
-
-				r.MessageEventChan <- msgEvent
-			}(data, rlen)
-		}
-	}()
-
+	go r.recvLoop()
 	go r.eventLoop()
 	go r.executeLoop()
 	go r.proposeLoop()
+	go r.timeoutLoop()
+	return nil
+}
+
+func (r *Replica) Stop() {
+	close(r.stop)
+	r.sock.Close()
+}
+
+// TODO: move to transporter
+func (r *Replica) recvLoop() {
+	data := make([]byte, 1024*16) // TODO: hard code
+
+	for {
+		select {
+		case <-r.stop:
+			return
+		default:
+		}
+
+		rlen, err := r.sock.Read(data)
+		if err != nil {
+			log.Println("listener is closed:", err)
+			return
+		}
+
+		go func(b []byte, n int) {
+			msg, err := messageProto(b[1])
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			err = xml.Unmarshal(b[2:n], msg)
+			if err != nil {
+				log.Println("Unmarshal", err)
+				return
+			}
+
+			msgEvent := &MessageEvent{
+				From:    b[0],
+				MsgType: b[1],
+				Message: msg,
+			}
+			log.Printf("%v\n", msgEvent)
+
+			r.MessageEventChan <- msgEvent
+		}(data, rlen)
+	}
+}
+
+func (r *Replica) timeoutLoop() {
+	for {
+		select {
+		case <-r.stop:
+			return
+		case <-r.timeoutTicker:
+			r.checkTimeout()
+		}
+	}
+}
+
+func (r *Replica) checkTimeout() {
+	for i, instance := range r.InstanceMatrix {
+		// from executeupto to max, test timestamp,
+		// if timeout, then send prepare
+		for j := r.ExecutedUpTo[i] + 1; j <= r.MaxInstanceNum[i]; j++ {
+			if r.IsCheckpoint(j) { // [*]Note: the first instance is also a checkpoint
+				continue
+			}
+			if instance[j].isTimeout() {
+				r.MessageEventChan <- r.makeTimeout(uint8(i), j)
+			}
+		}
+	}
+}
+
+func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *MessageEvent {
+	return &MessageEvent{
+		From: rowId,
+		Message: &data.Timeout{
+			ReplicaId:  rowId,
+			InstanceId: instanceId,
+		},
+	}
 	return nil
 }
 
 // handling events
 func (r *Replica) eventLoop() {
 	for {
-		// TODO: check timeout
-		// add time.After for timeout checking
 		select {
+		case <-r.stop:
+			return
 		case mevent := <-r.MessageEventChan:
 			r.dispatch(mevent)
 		}
@@ -200,22 +302,26 @@ func (r *Replica) eventLoop() {
 
 func (r *Replica) executeLoop() {
 	for {
-		time.Sleep(executeInterval)
-		// execution of committed instances
-		r.findAndExecute()
+		select {
+		case <-r.stop:
+			return
+		case <-r.executeTicker:
+			// execution of committed instances
+			r.findAndExecute()
+		}
 	}
 }
 
 func (r *Replica) proposeLoop() {
-	proposeTicker := time.Tick(r.BatchInterval)
-
-	bufferedCmds := make([]data.Command, 0)
+	bufferedCmds := make([]data.Command, 0) // hardcode
 
 	for {
 		select {
+		case <-r.stop:
+			return
 		case cmd := <-r.ProposeChan:
 			bufferedCmds = append(bufferedCmds, cmd)
-		case <-proposeTicker:
+		case <-r.proposeTicker:
 			if len(bufferedCmds) == 0 {
 				break
 			}
@@ -273,11 +379,13 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 	}
 
 	i := r.InstanceMatrix[replicaId][instanceId]
+	i.touch() // update last touched timestamp
+
+	v1Log.Infof("Replica[%v]: instance[%v][%v] status before = %v, ballot = [%v]\n",
+		r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
+
 	var action uint8
 	var msg Message
-
-	v1Log.Infof("Replica[%v]: instance[%v][%v] status before = %v\n",
-		r.Id, replicaId, instanceId, i.StatusString())
 
 	switch i.status {
 	case nilStatus:
@@ -288,32 +396,34 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 		action, msg = i.acceptedProcess(eventMsg)
 	case committed:
 		action, msg = i.committedProcess(eventMsg)
+	case preparing:
+		action, msg = i.preparingProcess(eventMsg)
 	default:
 		panic("")
 	}
 
-	if i.isAtStatus(committed) && action == noAction {
-		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v\n\n",
-			r.Id, replicaId, instanceId, i.StatusString())
+	if action == noAction {
+		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v, ballot = [%v]\n\n\n",
+			r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
 	} else {
-		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v\n",
-			r.Id, replicaId, instanceId, i.StatusString())
+		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v, ballot = [%v]\n",
+			r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
 	}
 
 	switch action {
 	case noAction:
 		return
 	case replyAction:
-		v1Log.Infof("Replica[%v]: send message[%s], to Replica[%v]\n\n",
+		v1Log.Infof("Replica[%v]: send message[%s], to Replica[%v]\n\n\n",
 			r.Id, msg.String(), mevent.From)
 		r.Transporter.Send(mevent.From, msg)
 	case fastQuorumAction:
-		v1Log.Infof("Replica[%v]: send message[%s], to FastQuorum\n\n",
-			r.Id, msg.String(), mevent.From)
+		v1Log.Infof("Replica[%v]: send message[%s], to FastQuorum\n\n\n",
+			r.Id, msg.String())
 		r.Transporter.MulticastFastquorum(msg)
 	case broadcastAction:
-		v1Log.Infof("Replica[%v]: send message[%s], to Everyone\n\n",
-			r.Id, msg.String(), mevent.From)
+		v1Log.Infof("Replica[%v]: send message[%s], to Everyone\n\n\n",
+			r.Id, msg.String())
 		r.Transporter.Broadcast(msg)
 	default:
 		panic("")

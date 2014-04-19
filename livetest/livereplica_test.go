@@ -43,7 +43,7 @@ func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 	}
 	for i := 0; i < clusterSize; i++ {
 		param.ReplicaId = uint8(i)
-		nodes[i] = replica.New(param)
+		nodes[i], _ = replica.New(param)
 	}
 
 	for i := 0; i < clusterSize; i++ {
@@ -120,10 +120,11 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 
 	for i := 0; i < maxInstance; i++ {
 		cmds := livetestlibExampleCommands(i)
-		nodes[0].BatchPropose(cmds)
+		go nodes[0].BatchPropose(cmds) // to disable batch
 		allCmds[i] = cmds
 	}
-	time.Sleep(1000 * time.Millisecond)
+	fmt.Println("Wait 5000 millis for completion")
+	time.Sleep(5000 * time.Millisecond)
 
 	// test log consistency
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
