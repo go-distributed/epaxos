@@ -56,6 +56,14 @@ const (
 	broadcastAction
 )
 
+const (
+	defaultClusterSize     = 3
+	defaultCheckpointCycle = 1024
+	defaultBatchInterval   = time.Millisecond * 50
+	defaultTimeoutInterval = time.Millisecond * 50
+	defaultExecuteInterval = time.Millisecond * 50
+)
+
 const defaultStartPort = 8080
 
 // ****************************
@@ -67,10 +75,9 @@ type Replica struct {
 	Size            uint8
 	MaxInstanceNum  []uint64 // the highest instance number seen for each replica
 	ProposeNum      uint64
-	ProposeChan     chan data.Command
+	ProposeChan     chan *proposeRequest
 	BatchInterval   time.Duration
 	TimeoutInterval time.Duration
-	stop            chan struct{}
 
 	CheckpointCycle  uint64
 	ExecutedUpTo     []uint64
@@ -88,9 +95,16 @@ type Replica struct {
 	sccIndex   int
 
 	// tickers
-	executeTicker <-chan time.Time
-	proposeTicker <-chan time.Time
-	timeoutTicker <-chan time.Time
+	executeTicker *time.Ticker
+	timeoutTicker *time.Ticker
+	proposeTicker *time.Ticker
+
+	// triggers
+	executeTrigger chan bool
+
+	// controllers
+	enableBatching bool
+	stop           chan struct{}
 }
 
 type Param struct {
@@ -102,6 +116,12 @@ type Param struct {
 	TimeoutInterval time.Duration
 	ExecuteInterval time.Duration
 	Addrs           []string
+	EnableBatching  bool
+}
+
+type proposeRequest struct {
+	cmd data.Command
+	id  chan uint64
 }
 
 type MessageEvent struct {
@@ -110,26 +130,33 @@ type MessageEvent struct {
 	Message Message
 }
 
+func newProposeRequest(command data.Command) *proposeRequest {
+	return &proposeRequest{
+		cmd: command.Clone(),
+		id:  make(chan uint64, 1), // avoid blocking
+	}
+}
+
 func verifyparam(param *Param) error {
 	// TODO: replicaID, uuid
 	if param.Size == 0 {
-		param.Size = 3
+		param.Size = defaultClusterSize
 	}
 	if param.Size%2 == 0 {
 		// TODO: epaxos replica error
 		return fmt.Errorf("Use odd number as quorum size")
 	}
 	if param.CheckpointCycle == 0 {
-		param.CheckpointCycle = 1024
+		param.CheckpointCycle = defaultCheckpointCycle
 	}
 	if param.BatchInterval == 0 {
-		param.BatchInterval = time.Millisecond * 50
+		param.BatchInterval = defaultBatchInterval
 	}
 	if param.TimeoutInterval == 0 {
-		param.TimeoutInterval = time.Millisecond * 50
+		param.TimeoutInterval = defaultTimeoutInterval
 	}
 	if param.ExecuteInterval == 0 {
-		param.ExecuteInterval = time.Millisecond * 50
+		param.ExecuteInterval = defaultExecuteInterval
 	}
 	if param.Addrs == nil {
 		param.Addrs = make([]string, param.Size)
@@ -150,7 +177,7 @@ func New(param *Param) (*Replica, error) {
 		Size:             param.Size,
 		MaxInstanceNum:   make([]uint64, param.Size),
 		ProposeNum:       1, // instance.id start from 1
-		ProposeChan:      make(chan data.Command),
+		ProposeChan:      make(chan *proposeRequest, 1024),
 		BatchInterval:    param.BatchInterval,
 		TimeoutInterval:  param.TimeoutInterval,
 		CheckpointCycle:  param.CheckpointCycle,
@@ -162,10 +189,18 @@ func New(param *Param) (*Replica, error) {
 		sccStack:         list.New(),
 		Addrs:            param.Addrs,
 
-		executeTicker: time.Tick(param.ExecuteInterval),
-		proposeTicker: time.Tick(param.BatchInterval),
-		timeoutTicker: time.Tick(param.TimeoutInterval),
-		stop:          make(chan struct{}),
+		executeTicker: time.NewTicker(param.ExecuteInterval),
+		timeoutTicker: time.NewTicker(param.TimeoutInterval),
+		proposeTicker: time.NewTicker(param.BatchInterval),
+
+		executeTrigger: make(chan bool),
+		stop:           make(chan struct{}),
+		enableBatching: param.EnableBatching,
+	}
+
+	if !r.enableBatching {
+		// stop ticker
+		r.proposeTicker.Stop()
 	}
 
 	for i := uint8(0); i < param.Size; i++ {
@@ -204,8 +239,15 @@ func (r *Replica) Start() error {
 	return nil
 }
 
+func (r *Replica) stopTickers() {
+	r.executeTicker.Stop()
+	r.timeoutTicker.Stop()
+	r.proposeTicker.Stop()
+}
+
 func (r *Replica) Stop() {
 	close(r.stop)
+	r.stopTickers()
 	r.sock.Close()
 }
 
@@ -256,7 +298,7 @@ func (r *Replica) timeoutLoop() {
 		select {
 		case <-r.stop:
 			return
-		case <-r.timeoutTicker:
+		case <-r.timeoutTicker.C:
 			r.checkTimeout()
 		}
 	}
@@ -310,56 +352,82 @@ func (r *Replica) executeLoop() {
 		select {
 		case <-r.stop:
 			return
-		case <-r.executeTicker:
+		case <-r.executeTicker.C:
 			// execution of committed instances
+			r.findAndExecute()
+		case <-r.executeTrigger:
 			r.findAndExecute()
 		}
 	}
 }
 
 func (r *Replica) proposeLoop() {
-	bufferedCmds := make([]data.Command, 0) // hardcode
+	bufferedRequests := make([]*proposeRequest, 0) // start from 0
 
 	for {
 		select {
 		case <-r.stop:
 			return
-		case cmd := <-r.ProposeChan:
-			bufferedCmds = append(bufferedCmds, cmd)
-		case <-r.proposeTicker:
-			if len(bufferedCmds) == 0 {
-				break
+		case req := <-r.ProposeChan:
+			bufferedRequests = append(bufferedRequests, req)
+			if !r.enableBatching {
+				r.BatchPropose(&bufferedRequests)
 			}
-			r.BatchPropose(bufferedCmds)
-			bufferedCmds = bufferedCmds[:0]
+		case <-r.proposeTicker.C:
+			r.BatchPropose(&bufferedRequests)
 		}
 	}
 }
 
-// TODO: This must be done in a synchronized/atomic way.
-func (r *Replica) Propose(cmd data.Command) {
-	r.ProposeChan <- cmd
+// return the channel containing the internal instance id
+func (r *Replica) Propose(cmd data.Command) chan uint64 {
+	req := newProposeRequest(cmd)
+	r.ProposeChan <- req
+	return req.id
 }
 
 // TODO: This must be done in a synchronized/atomic way.
-func (r *Replica) BatchPropose(batchedCmds data.Commands) {
-	cmds := make([]data.Command, len(batchedCmds))
-	copy(cmds, batchedCmds)
+func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
+	defer func() { *batchedRequests = (*batchedRequests)[:0] }() // resize
 
+	br := *batchedRequests
+	if len(br) == 0 {
+		return
+	}
+
+	cmds := make([]data.Command, len(br))
+
+	// copy commands
+	for i := range br {
+		cmds[i] = br[i].cmd
+	}
+
+	// record the current instance id
+	iid := r.ProposeNum
+	proposal := data.NewPropose(r.Id, iid, cmds)
 	mevent := &MessageEvent{
 		From:    r.Id,
 		MsgType: data.ProposeMsg,
-		Message: &data.Propose{
-			ReplicaId:  r.Id,
-			InstanceId: r.ProposeNum,
-			Cmds:       cmds,
-		},
+		Message: proposal,
 	}
+
+	// update propose num
 	r.ProposeNum++
 	if r.IsCheckpoint(r.ProposeNum) {
 		r.ProposeNum++
 	}
+
+	// TODO: we could use another channel
+	// and with synchronization to improve throughput
 	r.MessageEventChan <- mevent
+
+	// wait for the construction of instance and
+	// send back its id
+	<-proposal.Created
+	for _, req := range br {
+		req.id <- iid
+		close(req.id)
+	}
 }
 
 // *****************************
@@ -381,6 +449,10 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 
 	if r.InstanceMatrix[replicaId][instanceId] == nil {
 		r.InstanceMatrix[replicaId][instanceId] = NewInstance(r, replicaId, instanceId)
+		if p, ok := eventMsg.(*data.Propose); ok {
+			// send back a signal for this successfully creation
+			close(p.Created)
+		}
 	}
 
 	i := r.InstanceMatrix[replicaId][instanceId]

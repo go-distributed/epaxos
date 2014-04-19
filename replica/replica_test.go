@@ -638,3 +638,79 @@ func TestTimeout2(t *testing.T) {
 	default:
 	}
 }
+
+// test the correctness of the propose id without batching
+func TestProposeIdNoBatch(t *testing.T) {
+	N := 5000
+
+	param := &Param{
+		ReplicaId:      0,
+		Size:           5,
+		StateMachine:   new(test.DummySM),
+		EnableBatching: false,
+	}
+	r, _ := New(param)
+
+	// only start the propose
+	go r.proposeLoop()
+	go r.eventLoop()
+	defer close(r.stop)
+
+	resultIDs := make([]chan uint64, N)
+	expectIDs := make([]uint64, N)
+
+	j := uint64(0)
+	for i := 0; i < N; i++ {
+		if r.IsCheckpoint(j) {
+			j++
+		}
+		resultIDs[i] = r.Propose(data.Command("hello"))
+		expectIDs[i] = j
+		j++
+	}
+
+	for i := 0; i < N; i++ {
+		assert.Equal(t, <-resultIDs[i], expectIDs[i])
+	}
+}
+
+// test the correctness of the propose id with batching
+func TestProposeIdWithBatch(t *testing.T) {
+	N := 5000
+	B := 100
+
+	param := &Param{
+		ReplicaId:      0,
+		Size:           5,
+		StateMachine:   new(test.DummySM),
+		EnableBatching: true,
+		BatchInterval:  time.Millisecond * 50,
+	}
+	r, _ := New(param)
+
+	// only start the propose
+	go r.proposeLoop()
+	go r.eventLoop()
+	defer close(r.stop)
+
+	resultIDs := make([]chan uint64, N)
+	expectIDs := make([]uint64, N)
+
+	// let's batch 100 commands in a group
+	exp := uint64(0)
+	for i := 0; i < N/B; i++ {
+		for j := 0; j < B; j++ {
+			if r.IsCheckpoint(exp) {
+				exp++
+			}
+			resultIDs[i*B+j] = r.Propose(data.Command("hello"))
+			expectIDs[i*B+j] = exp
+		}
+		time.Sleep(param.BatchInterval * 2)
+		exp++
+	}
+
+	for i := 0; i < N; i++ {
+		assert.Equal(t, <-resultIDs[i], expectIDs[i])
+	}
+}

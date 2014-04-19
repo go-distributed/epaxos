@@ -141,7 +141,7 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 
 	for i := 0; i < maxInstance; i++ {
 		cmds := livetestlibExampleCommands(i)
-		go nodes[0].BatchPropose(cmds) // to disable batch
+		nodes[0].Propose(cmds) // to disable batch
 		allCmds[i] = cmds
 	}
 	fmt.Println("Wait 5000 millis for completion")
@@ -164,7 +164,7 @@ func Test3Replica3ProposerNoConflict(t *testing.T) {
 		for j := range nodes {
 			index := i*N + j
 			cmds := livetestlibExampleCommands(index)
-			go nodes[j].BatchPropose(cmds)
+			nodes[j].Propose(cmds)
 		}
 	}
 	fmt.Println("Wait 5000 millis for completion")
@@ -182,7 +182,7 @@ func Test2ProposerConflict(t *testing.T) {
 	for i := 1; i < maxInstance; i++ {
 		for j := 0; j < 2; j++ {
 			cmds := livetestlibExampleCommands(i)
-			go nodes[j].BatchPropose(cmds)
+			nodes[j].Propose(cmds)
 		}
 	}
 	fmt.Println("Wait 5000 millis for completion")
@@ -216,7 +216,7 @@ func Test3ProposerConflict(t *testing.T) {
 	for i := 1; i < maxInstance; i++ {
 		for j := 0; j < 3; j++ {
 			cmds := livetestlibExampleCommands(i)
-			go nodes[j].BatchPropose(cmds)
+			nodes[j].Propose(cmds)
 		}
 	}
 	fmt.Println("Wait 5000 millis for completion")
