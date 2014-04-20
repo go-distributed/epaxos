@@ -120,8 +120,8 @@ type Param struct {
 }
 
 type proposeRequest struct {
-	cmd data.Command
-	id  chan uint64
+	cmds data.Commands
+	id   chan uint64
 }
 
 type MessageEvent struct {
@@ -130,10 +130,10 @@ type MessageEvent struct {
 	Message Message
 }
 
-func newProposeRequest(command data.Command) *proposeRequest {
+func newProposeRequest(command ...data.Command) *proposeRequest {
 	return &proposeRequest{
-		cmd: command.Clone(),
-		id:  make(chan uint64, 1), // avoid blocking
+		cmds: data.Commands(command),
+		id:   make(chan uint64, 1), // avoid blocking
 	}
 }
 
@@ -380,8 +380,8 @@ func (r *Replica) proposeLoop() {
 }
 
 // return the channel containing the internal instance id
-func (r *Replica) Propose(cmd data.Command) chan uint64 {
-	req := newProposeRequest(cmd)
+func (r *Replica) Propose(cmds ...data.Command) chan uint64 {
+	req := newProposeRequest(cmds...)
 	r.ProposeChan <- req
 	return req.id
 }
@@ -395,11 +395,10 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 		return
 	}
 
-	cmds := make([]data.Command, len(br))
-
 	// copy commands
+	cmds := make([]data.Command, 0)
 	for i := range br {
-		cmds[i] = br[i].cmd
+		cmds = append(cmds, br[i].cmds...)
 	}
 
 	// record the current instance id
@@ -552,7 +551,7 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 		conflict := r.scanConflicts(instances, cmds, start, 0)
 		deps[curr] = conflict
 	}
-	i.cmds, i.deps = cmds, deps
+	i.cmds, i.deps = cmds.Clone(), deps.Clone()
 	// we can only update here because
 	// now we are safe to have cmds, etc. inside instance
 	if !i.replica.updateMaxInstanceNum(i.rowId, i.id) {

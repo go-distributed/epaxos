@@ -66,6 +66,9 @@ type Instance struct {
 	// tarjan SCC
 	sccIndex   int
 	sccLowlink int
+
+	CommittedNotify chan struct{}
+	ExecutedNotify  chan struct{}
 }
 
 // bookkeeping struct for recording counts of different messages and some flags
@@ -106,6 +109,9 @@ func NewInstance(replica *Replica, rowId uint8, instanceId uint64) (i *Instance)
 		recoveryInfo: NewRecoveryInfo(),
 		ballot:       data.NewBallot(0, 0, 0),
 		status:       nilStatus,
+
+		CommittedNotify: make(chan struct{}),
+		ExecutedNotify:  make(chan struct{}),
 	}
 	return i
 }
@@ -990,6 +996,7 @@ func (i *Instance) enterAcceptedAsReceiver() {
 func (i *Instance) enterCommitted() {
 	i.checkStatus(nilStatus, preAccepted, preparing, accepted)
 	i.status = committed
+	close(i.CommittedNotify)
 }
 
 func (i *Instance) enterPreparing() {
@@ -1051,6 +1058,7 @@ func (i *Instance) isExecuted() bool {
 
 func (i *Instance) SetExecuted() {
 	i.executed = true
+	close(i.ExecutedNotify)
 }
 
 func (i *Instance) isSender() bool {

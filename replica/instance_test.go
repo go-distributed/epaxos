@@ -468,7 +468,7 @@ func TestPreAcceptedProcessWithIgnorePreAccept(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, reply, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestPreAcceptedProcessWithHandlePreAccept asserts that
@@ -508,7 +508,7 @@ func TestPreAcceptedProcessWithHandlePreAccept(t *testing.T) {
 		Deps:       expectedDeps,
 		Ballot:     largerBallot,
 	})
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestPreAcceptedProcessWithIgnoreAccept asserts that
@@ -536,7 +536,7 @@ func TestPreAcceptedProcessWithIgnoreAccept(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, reply, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestPreAcceptedProcessWithHandleAccept asserts that
@@ -581,7 +581,7 @@ func TestPreAcceptedProcessWithHandleAccept(t *testing.T) {
 		InstanceId: inst.id,
 	})
 	expectedInst.ballot = smallerBallot
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 
 	// test larger ballot accept
 	// the above one is test both in same ballot. here the accept ballot is larger.
@@ -596,7 +596,7 @@ func TestPreAcceptedProcessWithHandleAccept(t *testing.T) {
 	_, reply = inst.preAcceptedProcess(ac)
 	assert.Equal(t, reply.(*data.AcceptReply).Ballot, largerBallot)
 	expectedInst.ballot = largerBallot
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestPreAcceptedProcessWithHandleCommit asserts that
@@ -628,7 +628,8 @@ func TestPreAcceptedProcessWithHandleCommit(t *testing.T) {
 	// - instance: cmds and deps are changed, and status == committed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
+	checkCommittedNotify(t, inst)
 }
 
 // TestPreAcceptedProcessWithIgnorePrepare asserts that
@@ -656,7 +657,7 @@ func TestPreAcceptedProcessWithIgnorePrepare(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, originalInst)
+	assertEqualInstance(t, inst, originalInst)
 }
 
 // TestPreAcceptedProcessWithHandlePrepare asserts that
@@ -700,7 +701,7 @@ func TestPreAcceptedProcessWithHandlePrepare(t *testing.T) {
 		Ballot:         largerBallot,
 		OriginalBallot: smallerBallot,
 	})
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestPreAcceptedProcessWithIgorePreAcceptReply asserts that
@@ -728,6 +729,10 @@ func TestPreAcceptedProcessWithIgorePreAcceptReply(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
+
+	// do not compare channel here
+	inst.CommittedNotify = nil
+	inst.ExecutedNotify = nil
 	assert.Equal(t, inst, originalInst)
 }
 
@@ -766,6 +771,10 @@ func TestPreAcceptedProcessWithHandlePreAcceptReply(t *testing.T) {
 		InstanceId: inst.id,
 		Ballot:     inst.ballot,
 	})
+
+	// do not compare channel here
+	inst.CommittedNotify = nil
+	inst.ExecutedNotify = nil
 	assert.Equal(t, inst, expectedInst)
 }
 
@@ -801,6 +810,7 @@ func TestPreAcceptedFastPath(t *testing.T) {
 				Cmds:       i.cmds,
 				Deps:       i.deps,
 			})
+			checkCommittedNotify(t, i)
 		}
 	}
 }
@@ -834,6 +844,7 @@ func TestPreAcceptedFastPath2(t *testing.T) {
 			assert.Equal(t, action, broadcastAction)
 			assert.Equal(t, i.status, committed)
 			assert.Equal(t, p.Deps, newerDeps)
+			checkCommittedNotify(t, i)
 		}
 	}
 }
@@ -926,7 +937,7 @@ func TestPreAcceptedProcessWithIgnorePreAcceptOk(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Nil(t, m)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestPreAcceptedProcessWithHandlePreAcceptOk asserts that
@@ -957,8 +968,8 @@ func TestPreAcceptedProcessWithHandlePreAcceptOk(t *testing.T) {
 		Cmds:       i.cmds,
 		Deps:       i.deps,
 	})
-
-	assert.Equal(t, i, expectedInst)
+	assertEqualInstance(t, i, expectedInst)
+	checkCommittedNotify(t, i)
 }
 
 // TestPreAcceptedProcessWithPrepareReply asserts that
@@ -996,7 +1007,7 @@ func TestPreAcceptedProcessWithPrepareReply(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, msg, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestPreAcceptedProcessWithPanic asserts that
@@ -1040,7 +1051,7 @@ func TestAcceptedProcessWithIgnorePreAccept(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestAcceptedProcessWithIgnoreAccept asserts that
@@ -1067,7 +1078,7 @@ func TestAcceptedProcessWithIgnoreAccept(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestAcceptedProcessWithHandleAccept asserts that
@@ -1112,8 +1123,7 @@ func TestAcceptedProcessWithHandleAccept(t *testing.T) {
 		InstanceId: inst.id,
 		Ballot:     inst.ballot,
 	})
-
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestAcceptedProcessWithHandleCommit asserts that
@@ -1145,7 +1155,8 @@ func TestAcceptedProcessWithHandleCommit(t *testing.T) {
 	// - instance: cmds == commit.cmds, deps == commit.deps
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
+	checkCommittedNotify(t, inst)
 }
 
 // TestAcceptedProcessWithIgnorePrepare asserts that
@@ -1174,7 +1185,7 @@ func TestAcceptedProcessWithIgnorePrepare(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, msg, nil)
-	assert.Equal(t, inst, originalInst)
+	assertEqualInstance(t, inst, originalInst)
 }
 
 // TestAcceptedProcessWithHandlePrepare asserts that
@@ -1215,7 +1226,7 @@ func TestAcceptedProcessWithHandlePrepare(t *testing.T) {
 	})
 
 	expectedInst.ballot = largeBallot
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestAcceptedProcessWithNoActionOnAcceptReply asserts that
@@ -1243,7 +1254,7 @@ func TestAcceptedProcessWithNoActionOnAcceptReply(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, originalInst)
+	assertEqualInstance(t, inst, originalInst)
 }
 
 // TestAcceptProcessWithHandleAcceptReply asserts that
@@ -1276,7 +1287,8 @@ func TestAcceptedProcessWithHandleAcceptReply(t *testing.T) {
 		ReplicaId:  inst.rowId,
 		InstanceId: inst.id,
 	})
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
+	checkCommittedNotify(t, inst)
 }
 
 // TestAcceptedProcessWithNoActionOnPreAcceptReply asserts that
@@ -1296,7 +1308,7 @@ func TestAcceptedProcessWithNoActionOnPreAcceptReply(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, msg, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestAcceptedProcessWithPrepareReply asserts that
@@ -1314,7 +1326,7 @@ func TestAcceptedProcessWithPrepareReply(t *testing.T) {
 	// expect:
 	// - should get panic since the instance is at its initial round
 	assert.Panics(t, func() { inst.acceptedProcess(pr) })
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 
 	// increase instance's ballot
 	inst.ballot = inst.ballot.IncNumClone()
@@ -1329,7 +1341,7 @@ func TestAcceptedProcessWithPrepareReply(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, msg, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // TestAcceptedProcessWithPanic asserts that panic happens when
@@ -1346,7 +1358,7 @@ func TestAcceptedProcessWithPanic(t *testing.T) {
 	// expect:
 	// - should get panic since the instance is not at accepted status
 	assert.Panics(t, func() { inst.acceptedProcess(ac) })
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 
 	// 2,
 	// create an accepted instance
@@ -1358,7 +1370,7 @@ func TestAcceptedProcessWithPanic(t *testing.T) {
 	// expect:
 	// - should get panic since it will fall through the `default' clause
 	assert.Panics(t, func() { inst.acceptedProcess(pp) })
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // **********************
@@ -1382,7 +1394,7 @@ func TestCommittedProcessWithNoAction(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Nil(t, m)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // If a committed instance receives accept, it will ignore the message.
@@ -1400,7 +1412,7 @@ func TestCommittedProcessWithRejcetAccept(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // if a committed instance receives prepare with
@@ -1441,7 +1453,7 @@ func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 	action, m := inst.committedProcess(p)
 	assert.Equal(t, action, replyAction)
 	assert.Equal(t, m, expectedReply)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 
 	// handle smaller ballot
 	p.Ballot = smallerBallot
@@ -1453,7 +1465,7 @@ func TestCommittedProcessWithHandlePrepare(t *testing.T) {
 	assert.Equal(t, m, expectedReply)
 
 	expectedInst.ballot = largerBallot
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // committed instance should ignore pre-accept messages.
@@ -1472,7 +1484,7 @@ func TestCommittedProcessWithIgnorePreAccept(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 func TestCommittedProccessWithPanic(t *testing.T) {
@@ -1484,7 +1496,7 @@ func TestCommittedProccessWithPanic(t *testing.T) {
 	// - action: will panic if is not at committed status
 	// - instance: nothing changed
 	assert.Panics(t, func() { inst.committedProcess(p) })
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 
 	// create a committed instance
 	inst = commonTestlibExampleCommittedInstance()
@@ -1494,7 +1506,7 @@ func TestCommittedProccessWithPanic(t *testing.T) {
 	// - action: will panic if receiving propose
 	// - instance: nothing changed
 	assert.Panics(t, func() { inst.committedProcess(p) })
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // **********************
@@ -1523,7 +1535,7 @@ func TestPreparingProcessWithIgnorePreAccept(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectInst)
+	assertEqualInstance(t, inst, expectInst)
 }
 
 // This function asserts that a preparing instance will handle a
@@ -1641,7 +1653,8 @@ func TestPreparingProcessWithHandleCommit(t *testing.T) {
 	//   other fields are expected
 	assert.Equal(t, action, noAction)
 	assert.Nil(t, m)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
+	checkCommittedNotify(t, inst)
 }
 
 // This function asserts that a preparing instance will ignore a
@@ -1666,7 +1679,7 @@ func TestPreparingProcessWithIgnorePrepare(t *testing.T) {
 	// - instance: nothing changed
 	assert.Equal(t, action, noAction)
 	assert.Equal(t, m, nil)
-	assert.Equal(t, inst, expectedInst)
+	assertEqualInstance(t, inst, expectedInst)
 }
 
 // This function asserts that a preparing instance will panic if
@@ -1774,6 +1787,7 @@ func TestPreparingProcessWithHandlePrepareReply(t *testing.T) {
 		Cmds:       inst.cmds,
 		Deps:       inst.deps,
 	})
+	checkCommittedNotify(t, inst)
 }
 
 // This function asserts that a preparing instance will ignore
@@ -2847,8 +2861,44 @@ func TestCheckStatus(t *testing.T) {
 }
 
 func TestExecuted(t *testing.T) {
-	i := &Instance{}
+	i := &Instance{
+		CommittedNotify: make(chan struct{}),
+		ExecutedNotify:  make(chan struct{}),
+	}
 	assert.False(t, i.isExecuted())
 	i.SetExecuted()
 	assert.True(t, i.isExecuted())
+	checkExecutedNotify(t, i)
+}
+
+func checkExecutedNotify(t *testing.T, i *Instance) {
+	select {
+	case <-i.ExecutedNotify:
+	default:
+		t.Fatal("should return from ExecutedNotify")
+	}
+}
+
+func checkCommittedNotify(t *testing.T, i *Instance) {
+	select {
+	case <-i.CommittedNotify:
+	default:
+		t.Fatal("should return from CommittedNotify")
+	}
+}
+
+func assertEqualInstance(t *testing.T, a, b *Instance) {
+	assert.Equal(t, a.cmds, b.cmds)
+	assert.Equal(t, a.deps, b.deps)
+	assert.Equal(t, a.status, b.status)
+	assert.Equal(t, a.ballot, b.ballot)
+	assert.Equal(t, a.lastTouched, b.lastTouched)
+	assert.Equal(t, a.info, b.info)
+	assert.Equal(t, a.recoveryInfo, b.recoveryInfo)
+	assert.Equal(t, a.replica, b.replica)
+	assert.Equal(t, a.rowId, b.rowId)
+	assert.Equal(t, a.id, b.id)
+	assert.Equal(t, a.executed, b.executed)
+	assert.Equal(t, a.sccIndex, b.sccIndex)
+	assert.Equal(t, a.sccLowlink, b.sccLowlink)
 }
