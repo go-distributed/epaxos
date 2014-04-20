@@ -1,15 +1,15 @@
 package main
 
 import (
+	"flag"
 	"fmt"
-	"log"
 	"math/rand"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/go-distributed/epaxos/data"
 	"github.com/go-distributed/epaxos/replica"
+	"github.com/golang/glog"
 )
 
 var _ = fmt.Printf
@@ -33,16 +33,21 @@ func (v *Voter) HaveConflicts(c1 []data.Command, c2 []data.Command) bool {
 }
 
 func main() {
+	var id int
+
+	flag.IntVar(&id, "id", -1, "id of the server")
+	flag.Parse()
+
+	if id < 0 {
+		fmt.Println("id is required!")
+		flag.PrintDefaults()
+		return
+	}
+
 	addrs := []string{
 		":9000", ":9001", ":9002",
 		//":9003", ":9004",
 	}
-
-	if len(os.Args) < 2 {
-		log.Fatal("Usage: ./server [id]")
-	}
-
-	id, _ := strconv.Atoi(os.Args[1])
 
 	param := &replica.Param{
 		Addrs:        addrs,
@@ -53,21 +58,21 @@ func main() {
 
 	r, err := replica.New(param)
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 
 	err = r.Start()
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 
 	rand.Seed(time.Now().UTC().UnixNano())
 	for {
 		time.Sleep(time.Millisecond * 500)
-		c := "From: " + os.Args[1] + ", Command: " + string(chars[rand.Intn(len(chars))]) + ", " + time.Now().String()
+		c := "From: " + strconv.Itoa(id) + ", Command: " + string(chars[rand.Intn(len(chars))]) + ", " + time.Now().String()
 
 		cmds := make([]data.Command, 0)
 		cmds = append(cmds, data.Command(c))
-		r.BatchPropose(cmds)
+		r.Propose(cmds...)
 	}
 }
