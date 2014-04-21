@@ -8,6 +8,16 @@ type Propose struct {
 	ReplicaId  uint8
 	InstanceId uint64
 	Cmds       Commands
+	Created    chan struct{}
+}
+
+func NewPropose(rid uint8, iid uint64, cmds Commands) *Propose {
+	return &Propose{
+		ReplicaId:  rid,
+		InstanceId: iid,
+		Cmds:       cmds,
+		Created:    make(chan struct{}),
+	}
 }
 
 func (p *Propose) Type() uint8 {

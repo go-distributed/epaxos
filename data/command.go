@@ -23,3 +23,9 @@ func (c Commands) Clone() Commands {
 	}
 	return cmds
 }
+
+func (c Command) Clone() Command {
+	cmd := make(Command, len(c))
+	copy(cmd, c)
+	return cmd
+}
