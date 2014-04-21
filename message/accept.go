@@ -1,4 +1,4 @@
-package data
+package message
 
 import (
 	"fmt"
@@ -10,12 +10,18 @@ type Accept struct {
 	Cmds       Commands
 	Deps       Dependencies
 	Ballot     *Ballot
+	From       uint8
 }
 
 type AcceptReply struct {
 	ReplicaId  uint8
 	InstanceId uint64
 	Ballot     *Ballot
+	From       uint8
+}
+
+func (a *Accept) Sender() uint8 {
+	return a.From
 }
 
 func (a *Accept) Type() uint8 {
@@ -36,6 +42,10 @@ func (p *Accept) Instance() uint64 {
 
 func (p *Accept) String() string {
 	return fmt.Sprintf("Accept, Instance[%v][%v], Ballot[%v]", p.ReplicaId, p.InstanceId, p.Ballot.String())
+}
+
+func (a *AcceptReply) Sender() uint8 {
+	return a.From
 }
 
 func (a *AcceptReply) Type() uint8 {

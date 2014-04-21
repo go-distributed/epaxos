@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/message"
 	"github.com/go-distributed/epaxos/replica"
+	"github.com/go-distributed/epaxos/transporter"
 	"github.com/golang/glog"
 )
 
@@ -23,12 +24,12 @@ type Voter struct {
 
 // NOTE: This is not idempotent.
 //      Same command might be executed for multiple times
-func (v *Voter) Execute(c []data.Command) ([]interface{}, error) {
+func (v *Voter) Execute(c []message.Command) ([]interface{}, error) {
 	fmt.Println(string(c[0]))
 	return nil, nil
 }
 
-func (v *Voter) HaveConflicts(c1 []data.Command, c2 []data.Command) bool {
+func (v *Voter) HaveConflicts(c1 []message.Command, c2 []message.Command) bool {
 	return true
 }
 
@@ -49,11 +50,16 @@ func main() {
 		//":9003", ":9004",
 	}
 
+	tr, err := transporter.NewUDPTransporter(addrs, uint8(id), len(addrs))
+	if err != nil {
+		panic(err)
+	}
 	param := &replica.Param{
 		Addrs:        addrs,
 		ReplicaId:    uint8(id),
 		Size:         uint8(len(addrs)),
 		StateMachine: new(Voter),
+		Transporter:  tr,
 	}
 
 	r, err := replica.New(param)
@@ -71,8 +77,8 @@ func main() {
 		time.Sleep(time.Millisecond * 500)
 		c := "From: " + strconv.Itoa(id) + ", Command: " + string(chars[rand.Intn(len(chars))]) + ", " + time.Now().String()
 
-		cmds := make([]data.Command, 0)
-		cmds = append(cmds, data.Command(c))
+		cmds := make([]message.Command, 0)
+		cmds = append(cmds, message.Command(c))
 		r.Propose(cmds...)
 	}
 }

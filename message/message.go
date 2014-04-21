@@ -1,10 +1,7 @@
-package replica
-
-import (
-	"github.com/go-distributed/epaxos/data"
-)
+package message
 
 type Message interface {
+	Sender() uint8
 	Type() uint8
 	Content() interface{}
 	Replica() uint8
@@ -14,23 +11,23 @@ type Message interface {
 
 func MessageTypeString(m Message) string {
 	switch m.Type() {
-	case data.ProposeMsg:
+	case ProposeMsg:
 		return "Propose"
-	case data.PreAcceptMsg:
+	case PreAcceptMsg:
 		return "PreAccept"
-	case data.PreAcceptOkMsg:
+	case PreAcceptOkMsg:
 		return "PreAcceptOk"
-	case data.PreAcceptReplyMsg:
+	case PreAcceptReplyMsg:
 		return "PreAcceptReply"
-	case data.AcceptMsg:
+	case AcceptMsg:
 		return "Accept"
-	case data.AcceptReplyMsg:
+	case AcceptReplyMsg:
 		return "AcceptReply"
-	case data.CommitMsg:
+	case CommitMsg:
 		return "Commit"
-	case data.PrepareMsg:
+	case PrepareMsg:
 		return "Prepare"
-	case data.PrepareReplyMsg:
+	case PrepareReplyMsg:
 		return "PrepareReply"
 	default:
 		panic("")

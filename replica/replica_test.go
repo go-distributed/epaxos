@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/go-distributed/epaxos"
-	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/message"
 	"github.com/go-distributed/epaxos/test"
+	"github.com/go-distributed/epaxos/transporter"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -18,6 +19,7 @@ func TestNewReplica(t *testing.T) {
 		ReplicaId:    3,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(3, 5),
 	}
 	r, _ := New(param)
 
@@ -42,11 +44,12 @@ func TestMakeInitialBallot(t *testing.T) {
 		ReplicaId:    3,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(3, 5),
 	}
 	r, _ := New(param)
 	r.Epoch = 3
 	b := r.makeInitialBallot()
-	assert.Equal(t, b, data.NewBallot(3, 0, 3))
+	assert.Equal(t, b, message.NewBallot(3, 0, 3))
 }
 
 // return a replica with id=5, size=5, and maxinstancenum of [1,2,3,4,5]
@@ -55,6 +58,7 @@ func depsTestSetupReplica() (r *Replica, i *Instance) {
 		ReplicaId:    4,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(4, 5),
 	}
 	r, _ = New(param)
 	for i := 0; i < 5; i++ {
@@ -75,7 +79,7 @@ func TestInitInstance(t *testing.T) {
 	r.initInstance(Cmds, i)
 
 	assert.Equal(t, i.cmds, Cmds)
-	assert.Equal(t, i.deps, data.Dependencies{1, 2, 3, 4, 5})
+	assert.Equal(t, i.deps, message.Dependencies{1, 2, 3, 4, 5})
 }
 
 // If no change in deps, it should return changed=false
@@ -84,15 +88,15 @@ func TestUpdateInstance(t *testing.T) {
 	r, i := depsTestSetupReplica()
 	cmds := commonTestlibExampleCommands()
 
-	deps := data.Dependencies{1, 2, 3, 4, 5}
+	deps := message.Dependencies{1, 2, 3, 4, 5}
 
 	changed := r.updateInstance(cmds, deps, r.Id, i)
 	// won't search at all. so no changes.
 	assert.False(t, changed)
 	assert.Equal(t, i.deps, deps)
 
-	emptyDeps := data.Dependencies{2, 0, 0, 0, 0}
-	expectedDeps := data.Dependencies{2, 2, 3, 4, 5} // it's from r0
+	emptyDeps := message.Dependencies{2, 0, 0, 0, 0}
+	expectedDeps := message.Dependencies{2, 2, 3, 4, 5} // it's from r0
 
 	changed = r.updateInstance(cmds, emptyDeps, 0, i)
 	assert.True(t, changed)
@@ -167,7 +171,7 @@ func TestResolveConflictsWithSimpleDeps(t *testing.T) {
 		r.InstanceMatrix[i][i+2].status = committed
 	}
 	r.InstanceMatrix[0][3] = NewInstance(r, 0, 3)
-	r.InstanceMatrix[0][3].deps = data.Dependencies{2, 3, 4, 5, 6}
+	r.InstanceMatrix[0][3].deps = message.Dependencies{2, 3, 4, 5, 6}
 	r.InstanceMatrix[0][3].status = committed
 
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][3]))
@@ -201,18 +205,18 @@ func TestResolveConflictsWithMultipleLevelDeps(t *testing.T) {
 	r := commonTestlibExampleReplica()
 	r.InstanceMatrix[0][6] = NewInstance(r, 0, 6)
 	r.InstanceMatrix[0][6].status = committed
-	r.InstanceMatrix[0][6].deps = data.Dependencies{4, 5, 6, 7, 8}
+	r.InstanceMatrix[0][6].deps = message.Dependencies{4, 5, 6, 7, 8}
 
 	// create 1st level deps (4, 5, 6, 7, 8)
 	for i := range r.InstanceMatrix {
 		r.InstanceMatrix[i][i+4] = NewInstance(r, uint8(i), uint64(i+4))
 		r.InstanceMatrix[i][i+4].status = committed
 	}
-	r.InstanceMatrix[0][4].deps = data.Dependencies{2, 0, 0, 0, 0}
-	r.InstanceMatrix[1][5].deps = data.Dependencies{2, 3, 0, 0, 0}
-	r.InstanceMatrix[2][6].deps = data.Dependencies{2, 3, 4, 0, 0}
-	r.InstanceMatrix[3][7].deps = data.Dependencies{2, 3, 4, 5, 0}
-	r.InstanceMatrix[4][8].deps = data.Dependencies{2, 3, 4, 5, 6}
+	r.InstanceMatrix[0][4].deps = message.Dependencies{2, 0, 0, 0, 0}
+	r.InstanceMatrix[1][5].deps = message.Dependencies{2, 3, 0, 0, 0}
+	r.InstanceMatrix[2][6].deps = message.Dependencies{2, 3, 4, 0, 0}
+	r.InstanceMatrix[3][7].deps = message.Dependencies{2, 3, 4, 5, 0}
+	r.InstanceMatrix[4][8].deps = message.Dependencies{2, 3, 4, 5, 6}
 
 	// create 2nd level deps (2, 3, 4, 5, 6)
 	for i := range r.InstanceMatrix {
@@ -257,18 +261,18 @@ func TestResolveConflictsWithSccDeps(t *testing.T) {
 	r := commonTestlibExampleReplica()
 	r.InstanceMatrix[0][6] = NewInstance(r, 0, 6)
 	r.InstanceMatrix[0][6].status = committed
-	r.InstanceMatrix[0][6].deps = data.Dependencies{4, 5, 6, 7, 8}
+	r.InstanceMatrix[0][6].deps = message.Dependencies{4, 5, 6, 7, 8}
 
 	// create 1st level deps (4, 5, 6, 7, 8)
 	for i := range r.InstanceMatrix {
 		r.InstanceMatrix[i][i+4] = NewInstance(r, uint8(i), uint64(i+4))
 		r.InstanceMatrix[i][i+4].status = committed
 	}
-	r.InstanceMatrix[0][4].deps = data.Dependencies{2, 0, 0, 0, 0}
-	r.InstanceMatrix[1][5].deps = data.Dependencies{0, 3, 0, 0, 0}
-	r.InstanceMatrix[2][6].deps = data.Dependencies{0, 0, 4, 0, 0}
-	r.InstanceMatrix[3][7].deps = data.Dependencies{0, 0, 0, 5, 0}
-	r.InstanceMatrix[4][8].deps = data.Dependencies{0, 0, 0, 0, 6}
+	r.InstanceMatrix[0][4].deps = message.Dependencies{2, 0, 0, 0, 0}
+	r.InstanceMatrix[1][5].deps = message.Dependencies{0, 3, 0, 0, 0}
+	r.InstanceMatrix[2][6].deps = message.Dependencies{0, 0, 4, 0, 0}
+	r.InstanceMatrix[3][7].deps = message.Dependencies{0, 0, 0, 5, 0}
+	r.InstanceMatrix[4][8].deps = message.Dependencies{0, 0, 0, 0, 6}
 
 	// create 2nd level deps (2, 3, 4, 5, 6)
 	for i := range r.InstanceMatrix {
@@ -277,8 +281,8 @@ func TestResolveConflictsWithSccDeps(t *testing.T) {
 	}
 
 	// create a scc (2->4, 2->5, 3->4, 3->5)
-	r.InstanceMatrix[0][2].deps = data.Dependencies{4, 5, 0, 0, 0}
-	r.InstanceMatrix[1][3].deps = data.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[0][2].deps = message.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[1][3].deps = message.Dependencies{4, 5, 0, 0, 0}
 
 	assert.True(t, r.resolveConflicts(r.InstanceMatrix[0][6]))
 
@@ -314,18 +318,18 @@ func TestResolveConflictsWithSccDepsAndUncommitedInstance(t *testing.T) {
 	r := commonTestlibExampleReplica()
 	r.InstanceMatrix[0][6] = NewInstance(r, 0, 6)
 	r.InstanceMatrix[0][6].status = committed
-	r.InstanceMatrix[0][6].deps = data.Dependencies{4, 5, 6, 7, 8}
+	r.InstanceMatrix[0][6].deps = message.Dependencies{4, 5, 6, 7, 8}
 
 	// create 1st level deps (4, 5, 6, 7, 8)
 	for i := range r.InstanceMatrix {
 		r.InstanceMatrix[i][i+4] = NewInstance(r, uint8(i), uint64(i+4))
 		r.InstanceMatrix[i][i+4].status = committed
 	}
-	r.InstanceMatrix[0][4].deps = data.Dependencies{2, 0, 0, 0, 0}
-	r.InstanceMatrix[1][5].deps = data.Dependencies{0, 3, 0, 0, 0}
-	r.InstanceMatrix[2][6].deps = data.Dependencies{0, 0, 4, 0, 0}
-	r.InstanceMatrix[3][7].deps = data.Dependencies{0, 0, 0, 5, 0}
-	r.InstanceMatrix[4][8].deps = data.Dependencies{0, 0, 0, 0, 6}
+	r.InstanceMatrix[0][4].deps = message.Dependencies{2, 0, 0, 0, 0}
+	r.InstanceMatrix[1][5].deps = message.Dependencies{0, 3, 0, 0, 0}
+	r.InstanceMatrix[2][6].deps = message.Dependencies{0, 0, 4, 0, 0}
+	r.InstanceMatrix[3][7].deps = message.Dependencies{0, 0, 0, 5, 0}
+	r.InstanceMatrix[4][8].deps = message.Dependencies{0, 0, 0, 0, 6}
 
 	// create 2nd level deps (2, 3, 4, 5, 6)
 	for i := range r.InstanceMatrix {
@@ -334,8 +338,8 @@ func TestResolveConflictsWithSccDepsAndUncommitedInstance(t *testing.T) {
 	}
 
 	// create a scc (2->4, 2->5, 3->4, 3->5)
-	r.InstanceMatrix[0][2].deps = data.Dependencies{4, 5, 0, 0, 0}
-	r.InstanceMatrix[1][3].deps = data.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[0][2].deps = message.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[1][3].deps = message.Dependencies{4, 5, 0, 0, 0}
 
 	// create an un-committed instance
 	r.InstanceMatrix[4][6].status = accepted
@@ -368,18 +372,18 @@ func TestResolveConflictsWithSccDepsAndexecutedInstance(t *testing.T) {
 	r := commonTestlibExampleReplica()
 	r.InstanceMatrix[0][6] = NewInstance(r, 0, 6)
 	r.InstanceMatrix[0][6].status = committed
-	r.InstanceMatrix[0][6].deps = data.Dependencies{4, 5, 6, 7, 8}
+	r.InstanceMatrix[0][6].deps = message.Dependencies{4, 5, 6, 7, 8}
 
 	// create 1st level deps (4, 5, 6, 7, 8)
 	for i := range r.InstanceMatrix {
 		r.InstanceMatrix[i][i+4] = NewInstance(r, uint8(i), uint64(i+4))
 		r.InstanceMatrix[i][i+4].status = committed
 	}
-	r.InstanceMatrix[0][4].deps = data.Dependencies{2, 0, 0, 0, 0}
-	r.InstanceMatrix[1][5].deps = data.Dependencies{0, 3, 0, 0, 0}
-	r.InstanceMatrix[2][6].deps = data.Dependencies{0, 0, 4, 0, 0}
-	r.InstanceMatrix[3][7].deps = data.Dependencies{0, 0, 0, 5, 0}
-	r.InstanceMatrix[4][8].deps = data.Dependencies{0, 0, 0, 0, 6}
+	r.InstanceMatrix[0][4].deps = message.Dependencies{2, 0, 0, 0, 0}
+	r.InstanceMatrix[1][5].deps = message.Dependencies{0, 3, 0, 0, 0}
+	r.InstanceMatrix[2][6].deps = message.Dependencies{0, 0, 4, 0, 0}
+	r.InstanceMatrix[3][7].deps = message.Dependencies{0, 0, 0, 5, 0}
+	r.InstanceMatrix[4][8].deps = message.Dependencies{0, 0, 0, 0, 6}
 
 	// create 2nd level deps (2, 3, 4, 5, 6)
 	for i := range r.InstanceMatrix {
@@ -388,8 +392,8 @@ func TestResolveConflictsWithSccDepsAndexecutedInstance(t *testing.T) {
 	}
 
 	// create a scc (2->4, 2->5, 3->4, 3->5)
-	r.InstanceMatrix[0][2].deps = data.Dependencies{4, 5, 0, 0, 0}
-	r.InstanceMatrix[1][3].deps = data.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[0][2].deps = message.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[1][3].deps = message.Dependencies{4, 5, 0, 0, 0}
 
 	// create an executed instance
 	// [*] Note: The deps of [4][8] won't be executed either.
@@ -422,61 +426,61 @@ func TestResolveConflictsWithSccDepsAndexecutedInstance(t *testing.T) {
 // a helper to make committed instances, containing scc, no un-committed, nor executed instances
 func makeCommitedInstances(r *Replica) {
 	r.InstanceMatrix[0][6] = NewInstance(r, 0, 6)
-	r.InstanceMatrix[0][6].cmds = data.Commands{
-		data.Command("[0][6]"),
-		data.Command("[0][6]"),
+	r.InstanceMatrix[0][6].cmds = message.Commands{
+		message.Command("[0][6]"),
+		message.Command("[0][6]"),
 	}
 	r.InstanceMatrix[0][6].status = committed
-	r.InstanceMatrix[0][6].deps = data.Dependencies{4, 5, 6, 7, 8}
+	r.InstanceMatrix[0][6].deps = message.Dependencies{4, 5, 6, 7, 8}
 
 	// create 1st level deps (4, 5, 6, 7, 8)
 	for i := range r.InstanceMatrix {
 		r.InstanceMatrix[i][i+4] = NewInstance(r, uint8(i), uint64(i+4))
 		r.InstanceMatrix[i][i+4].status = committed
 	}
-	r.InstanceMatrix[0][4].deps = data.Dependencies{2, 0, 0, 0, 0}
-	r.InstanceMatrix[0][4].cmds = data.Commands{
-		data.Command("[0][4]"),
-		data.Command("[0][4]"),
+	r.InstanceMatrix[0][4].deps = message.Dependencies{2, 0, 0, 0, 0}
+	r.InstanceMatrix[0][4].cmds = message.Commands{
+		message.Command("[0][4]"),
+		message.Command("[0][4]"),
 	}
 
-	r.InstanceMatrix[1][5].deps = data.Dependencies{0, 3, 0, 0, 0}
-	r.InstanceMatrix[1][5].cmds = data.Commands{
-		data.Command("[1][5]"),
-		data.Command("[1][5]"),
+	r.InstanceMatrix[1][5].deps = message.Dependencies{0, 3, 0, 0, 0}
+	r.InstanceMatrix[1][5].cmds = message.Commands{
+		message.Command("[1][5]"),
+		message.Command("[1][5]"),
 	}
 
-	r.InstanceMatrix[2][6].deps = data.Dependencies{0, 0, 4, 0, 0}
-	r.InstanceMatrix[2][6].cmds = data.Commands{
-		data.Command("[2][6]"),
-		data.Command("[2][6]"),
+	r.InstanceMatrix[2][6].deps = message.Dependencies{0, 0, 4, 0, 0}
+	r.InstanceMatrix[2][6].cmds = message.Commands{
+		message.Command("[2][6]"),
+		message.Command("[2][6]"),
 	}
 
-	r.InstanceMatrix[3][7].deps = data.Dependencies{0, 0, 0, 5, 0}
-	r.InstanceMatrix[3][7].cmds = data.Commands{
-		data.Command("[3][7]"),
-		data.Command("[3][7]"),
+	r.InstanceMatrix[3][7].deps = message.Dependencies{0, 0, 0, 5, 0}
+	r.InstanceMatrix[3][7].cmds = message.Commands{
+		message.Command("[3][7]"),
+		message.Command("[3][7]"),
 	}
 
-	r.InstanceMatrix[4][8].deps = data.Dependencies{0, 0, 0, 0, 6}
-	r.InstanceMatrix[4][8].cmds = data.Commands{
-		data.Command("[4][8]"),
-		data.Command("[4][8]"),
+	r.InstanceMatrix[4][8].deps = message.Dependencies{0, 0, 0, 0, 6}
+	r.InstanceMatrix[4][8].cmds = message.Commands{
+		message.Command("[4][8]"),
+		message.Command("[4][8]"),
 	}
 
 	// create 2nd level deps (2, 3, 4, 5, 6)
 	for i := range r.InstanceMatrix {
 		r.InstanceMatrix[i][i+2] = NewInstance(r, uint8(i), uint64(i+2))
 		r.InstanceMatrix[i][i+2].status = committed
-		r.InstanceMatrix[i][i+2].cmds = data.Commands{
-			data.Command(fmt.Sprintf("[%d][%d]", i, i+2)),
-			data.Command(fmt.Sprintf("[%d][%d]", i, i+2)),
+		r.InstanceMatrix[i][i+2].cmds = message.Commands{
+			message.Command(fmt.Sprintf("[%d][%d]", i, i+2)),
+			message.Command(fmt.Sprintf("[%d][%d]", i, i+2)),
 		}
 	}
 
 	// create a scc (2->4, 2->5, 3->4, 3->5)
-	r.InstanceMatrix[0][2].deps = data.Dependencies{4, 5, 0, 0, 0}
-	r.InstanceMatrix[1][3].deps = data.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[0][2].deps = message.Dependencies{4, 5, 0, 0, 0}
+	r.InstanceMatrix[1][3].deps = message.Dependencies{4, 5, 0, 0, 0}
 }
 
 // This func tests the result of executeList()
@@ -516,8 +520,8 @@ func TestExecuteListWithError(t *testing.T) {
 	makeCommitedInstances(r)
 
 	// create an error
-	r.InstanceMatrix[0][6].cmds = data.Commands{
-		data.Command("error"),
+	r.InstanceMatrix[0][6].cmds = message.Commands{
+		message.Command("error"),
 	}
 
 	// resolve conflicts
@@ -553,7 +557,7 @@ func TestNoTimeout1(t *testing.T) {
 	time.Sleep(2 * r.TimeoutInterval)
 	go r.checkTimeout()
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 		t.Fatal("shouldn't get a timeout message")
 	default:
 	}
@@ -567,7 +571,7 @@ func TestNoTimeout2(t *testing.T) {
 	time.Sleep(2 * r.TimeoutInterval)
 	go r.checkTimeout()
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 		t.Fatal("shouldn't get a timeout message for committed instance")
 	default:
 	}
@@ -583,14 +587,14 @@ func TestTimeout1(t *testing.T) {
 	time.Sleep(r.TimeoutInterval) // wait for message sending
 
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 	default:
 		t.Fatal("should get a timeout message from a uncommitted instance")
 	}
 
 	time.Sleep(r.TimeoutInterval) // wait for message sending
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 		t.Fatal("should get only one timeout message from a uncommitted instance")
 	default:
 	}
@@ -618,13 +622,10 @@ func TestTimeout2(t *testing.T) {
 				continue
 			}
 			select {
-			case msg := <-r.MessageEventChan:
-				assert.Equal(t, msg, &MessageEvent{
-					From: r.Id,
-					Message: &data.Timeout{
-						ReplicaId:  uint8(i),
-						InstanceId: uint64(j),
-					},
+			case msg := <-r.MessageChan:
+				assert.Equal(t, msg, &message.Timeout{
+					ReplicaId:  uint8(i),
+					InstanceId: uint64(j),
 				})
 			default:
 				t.Fatal("should get timeout messages")
@@ -633,7 +634,7 @@ func TestTimeout2(t *testing.T) {
 	}
 	time.Sleep(r.TimeoutInterval) // wait for message sending
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 		t.Fatal("shouldn't get more timeout messages")
 	default:
 	}
@@ -648,6 +649,7 @@ func TestProposeIdNoBatch(t *testing.T) {
 		Size:           5,
 		StateMachine:   new(test.DummySM),
 		EnableBatching: false,
+		Transporter:    transporter.NewDummyTR(0, 5),
 	}
 	r, _ := New(param)
 
@@ -664,7 +666,7 @@ func TestProposeIdNoBatch(t *testing.T) {
 		if r.IsCheckpoint(j) {
 			j++
 		}
-		resultIDs[i] = r.Propose(data.Command("hello"))
+		resultIDs[i] = r.Propose(message.Command("hello"))
 		expectIDs[i] = j
 		j++
 	}
@@ -685,6 +687,7 @@ func TestProposeIdWithBatch(t *testing.T) {
 		StateMachine:   new(test.DummySM),
 		EnableBatching: true,
 		BatchInterval:  time.Millisecond * 50,
+		Transporter:    transporter.NewDummyTR(0, 5),
 	}
 	r, _ := New(param)
 
@@ -703,7 +706,7 @@ func TestProposeIdWithBatch(t *testing.T) {
 			if r.IsCheckpoint(exp) {
 				exp++
 			}
-			resultIDs[i*B+j] = r.Propose(data.Command("hello"))
+			resultIDs[i*B+j] = r.Propose(message.Command("hello"))
 			expectIDs[i*B+j] = exp
 		}
 		time.Sleep(param.BatchInterval * 2)

@@ -1,4 +1,4 @@
-package data
+package message
 
 type Dependencies []uint64
 
