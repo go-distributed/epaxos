@@ -7,6 +7,11 @@ import (
 type Timeout struct {
 	ReplicaId  uint8
 	InstanceId uint64
+	From       uint8
+}
+
+func (t *Timeout) Sender() uint8 {
+	return t.From
 }
 
 func (t *Timeout) Type() uint8 {

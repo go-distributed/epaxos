@@ -8,6 +8,7 @@ type Prepare struct {
 	ReplicaId  uint8
 	InstanceId uint64
 	Ballot     *Ballot
+	From       uint8
 }
 
 type PrepareReply struct {
@@ -20,6 +21,11 @@ type PrepareReply struct {
 	// These two are used for identical non orignal leader pre-accept reply
 	OriginalBallot *Ballot
 	IsFromLeader   bool
+	From           uint8
+}
+
+func (p *Prepare) Sender() uint8 {
+	return p.From
 }
 
 func (p *Prepare) Type() uint8 {
@@ -40,6 +46,10 @@ func (p *Prepare) Instance() uint64 {
 
 func (p *Prepare) String() string {
 	return fmt.Sprintf("Prepare, Instance[%v][%v], Ballot[%v]", p.ReplicaId, p.InstanceId, p.Ballot.String())
+}
+
+func (p *PrepareReply) Sender() uint8 {
+	return p.From
 }
 
 func (p *PrepareReply) Type() uint8 {

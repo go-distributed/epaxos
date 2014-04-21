@@ -9,6 +9,11 @@ type Commit struct {
 	InstanceId uint64
 	Cmds       Commands
 	Deps       Dependencies
+	From       uint8
+}
+
+func (c *Commit) Sender() uint8 {
+	return c.From
 }
 
 func (c *Commit) Type() uint8 {

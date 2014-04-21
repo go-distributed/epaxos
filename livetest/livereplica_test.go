@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/message"
 	"github.com/go-distributed/epaxos/replica"
 	"github.com/go-distributed/epaxos/test"
+	"github.com/go-distributed/epaxos/transporter"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -17,18 +18,18 @@ import (
 var _ = fmt.Printf
 var _ = assert.Equal
 
-func livetestlibExampleCommands(i int) data.Commands {
-	return data.Commands{
-		data.Command(strconv.Itoa(i)),
+func livetestlibExampleCommands(i int) message.Commands {
+	return message.Commands{
+		message.Command(strconv.Itoa(i)),
 	}
 }
 
-func livetestlibConflictedCommands(total int) (res []data.Commands) {
-	res = make([]data.Commands, total)
-	for i := 0; i < total; i++ {
-		res[i] = data.Commands{
-			data.Command("c"),
-			data.Command(strconv.Itoa(i)),
+func livetestlibConflictedCommands(total int) (res []message.Commands) {
+	res = make([]message.Commands, total)
+	for i := range res {
+		res[i] = message.Commands{
+			message.Command("c"),
+			message.Command(strconv.Itoa(i)),
 		}
 	}
 	return
@@ -37,22 +38,23 @@ func livetestlibConflictedCommands(total int) (res []data.Commands) {
 func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 	nodes := make([]*replica.Replica, clusterSize)
 
-	param := &replica.Param{
-		Size:         uint8(clusterSize),
-		StateMachine: new(test.DummySM),
-	}
-	for i := 0; i < clusterSize; i++ {
-		param.ReplicaId = uint8(i)
+	for i := range nodes {
+		param := &replica.Param{
+			ReplicaId:    uint8(i),
+			Size:         uint8(clusterSize),
+			StateMachine: new(test.DummySM),
+			Transporter:  transporter.NewDummyTR(uint8(i), clusterSize),
+		}
 		nodes[i], _ = replica.New(param)
 	}
 
-	for i := 0; i < clusterSize; i++ {
-		nodes[i].Transporter = &DummyTransporter{
-			Nodes:      nodes,
-			Self:       uint8(i),
-			FastQuorum: uint8(clusterSize) - 2,
-			All:        uint8(clusterSize),
-		}
+	chs := make([]chan message.Message, clusterSize)
+	for i := range nodes {
+		chs[i] = nodes[i].MessageChan
+	}
+
+	for i := range nodes {
+		nodes[i].Transporter.(*transporter.DummyTransporter).RegisterChannels(chs)
 		nodes[i].Start()
 	}
 
@@ -134,7 +136,7 @@ func livetestlibLogConsistent(t *testing.T, replicas ...*replica.Replica) bool {
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica1ProposerNoConflict(t *testing.T) {
 	maxInstance := 1024 * 4
-	allCmds := make([]data.Commands, maxInstance)
+	allCmds := make([]message.Commands, maxInstance)
 
 	nodes := livetestlibSetupCluster(3)
 	defer livetestlibStopCluster(nodes)
@@ -223,7 +225,7 @@ func Test3ProposerConflict(t *testing.T) {
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 
-	deps := make([]data.Dependencies, 3)
+	deps := make([]message.Dependencies, 3)
 	for i := 1; i < maxInstance; i++ {
 		deps[0] = nodes[0].InstanceMatrix[0][i].Dependencies()
 		deps[1] = nodes[0].InstanceMatrix[1][i].Dependencies()

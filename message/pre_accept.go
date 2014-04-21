@@ -10,6 +10,7 @@ type PreAccept struct {
 	Cmds       Commands
 	Deps       Dependencies
 	Ballot     *Ballot
+	From       uint8
 }
 
 // we don't need ReplicaId in PreAcceptOk,
@@ -17,6 +18,7 @@ type PreAccept struct {
 type PreAcceptOk struct {
 	ReplicaId  uint8
 	InstanceId uint64
+	From       uint8
 }
 
 type PreAcceptReply struct {
@@ -24,9 +26,14 @@ type PreAcceptReply struct {
 	InstanceId uint64
 	Deps       Dependencies
 	Ballot     *Ballot
+	From       uint8
 }
 
 // PreAccept
+func (p *PreAccept) Sender() uint8 {
+	return p.From
+}
+
 func (p *PreAccept) Type() uint8 {
 	return PreAcceptMsg
 }
@@ -48,6 +55,10 @@ func (p *PreAccept) String() string {
 }
 
 // PreAcceptOk
+func (p *PreAcceptOk) Sender() uint8 {
+	return p.From
+}
+
 func (p *PreAcceptOk) Type() uint8 {
 	return PreAcceptOkMsg
 }
@@ -69,6 +80,10 @@ func (p *PreAcceptOk) String() string {
 }
 
 // PreAcceptReply
+func (p *PreAcceptReply) Sender() uint8 {
+	return p.From
+}
+
 func (p *PreAcceptReply) Type() uint8 {
 	return PreAcceptReplyMsg
 }

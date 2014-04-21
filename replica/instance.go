@@ -148,7 +148,7 @@ func (i *Instance) isBeforeStatus(status uint8) bool {
 }
 
 func (i *Instance) isNewBorn() bool {
-	return i.ballot.Epoch() == 0
+	return i.ballot.GetEpoch() == 0
 }
 
 func (i *Instance) Commands() message.Commands {
@@ -254,7 +254,7 @@ func (i *Instance) nilStatusProcess(m message.Message) (action uint8, msg messag
 		}
 		return i.handlePrepare(content)
 	case *message.PrepareReply:
-		if i.isNewBorn() || i.ballot.Number() == 0 {
+		if i.isNewBorn() || i.ballot.GetNumber() == 0 {
 			panic("Never send prepare before but receive prepare reply")
 		}
 		return noAction, nil
@@ -497,6 +497,7 @@ func (i *Instance) handlePreAccept(p *message.PreAccept) (action uint8, msg mess
 	return replyAction, &message.PreAcceptOk{
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
+		From:       i.replica.Id,
 	}
 }
 
@@ -919,6 +920,7 @@ func (i *Instance) makePreAcceptReply(ok bool, deps message.Dependencies) *messa
 		InstanceId: i.id,
 		Deps:       deps,
 		Ballot:     i.ballot.Clone(),
+		From:       i.replica.Id,
 	}
 }
 
@@ -929,6 +931,7 @@ func (i *Instance) makePreAccept() *message.PreAccept {
 		Cmds:       i.cmds.Clone(),
 		Deps:       i.deps.Clone(),
 		Ballot:     i.ballot.Clone(),
+		From:       i.replica.Id,
 	}
 }
 
@@ -939,6 +942,7 @@ func (i *Instance) makeAccept() *message.Accept {
 		Cmds:       i.cmds.Clone(),
 		Deps:       i.deps.Clone(),
 		Ballot:     i.ballot.Clone(),
+		From:       i.replica.Id,
 	}
 }
 
@@ -947,6 +951,7 @@ func (i *Instance) makeAcceptReply(ok bool) *message.AcceptReply {
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
+		From:       i.replica.Id,
 	}
 }
 
@@ -956,6 +961,7 @@ func (i *Instance) makeCommit() *message.Commit {
 		InstanceId: i.id,
 		Cmds:       i.cmds.Clone(),
 		Deps:       i.deps.Clone(),
+		From:       i.replica.Id,
 	}
 }
 
@@ -964,6 +970,7 @@ func (i *Instance) makePrepare() *message.Prepare {
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Ballot:     i.ballot.Clone(),
+		From:       i.replica.Id,
 	}
 }
 
@@ -1065,7 +1072,7 @@ func (i *Instance) isSender() bool {
 	if i.isAtStatus(nilStatus) {
 		return false
 	}
-	if i.ballot.ReplicaId() == i.replica.Id {
+	if i.ballot.GetReplicaId() == i.replica.Id {
 		return true
 	}
 	return false

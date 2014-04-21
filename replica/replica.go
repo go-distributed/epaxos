@@ -15,16 +15,12 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
-	"io"
-	"log"
-	"net"
 	"sort"
 	"time"
 
-	"github.com/golang/glog"
-
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/message"
+	"github.com/golang/glog"
 )
 
 // #if test
@@ -78,15 +74,14 @@ type Replica struct {
 	BatchInterval   time.Duration
 	TimeoutInterval time.Duration
 
-	CheckpointCycle  uint64
-	ExecutedUpTo     []uint64
-	InstanceMatrix   [][]*Instance
-	StateMachine     epaxos.StateMachine
-	Epoch            uint32
-	MessageEventChan chan *message.MessageEvent
-	sock             io.ReadWriteCloser
-	Addrs            []string
-	Transporter      epaxos.Transporter
+	CheckpointCycle uint64
+	ExecutedUpTo    []uint64
+	InstanceMatrix  [][]*Instance
+	StateMachine    epaxos.StateMachine
+	Epoch           uint32
+	MessageChan     chan message.Message
+	Addrs           []string
+	Transporter     epaxos.Transporter
 
 	// tarjan SCC
 	sccStack   *list.List
@@ -115,6 +110,7 @@ type Param struct {
 	TimeoutInterval time.Duration
 	ExecuteInterval time.Duration
 	Addrs           []string
+	Transporter     epaxos.Transporter
 	EnableBatching  bool
 }
 
@@ -157,6 +153,9 @@ func verifyparam(param *Param) error {
 			param.Addrs[i] = fmt.Sprintf("localhost:%d", defaultStartPort+i)
 		}
 	}
+	if param.Transporter == nil {
+		return fmt.Errorf("No specified transporter")
+	}
 	return nil
 }
 
@@ -166,21 +165,22 @@ func New(param *Param) (*Replica, error) {
 		return nil, err
 	}
 	r := &Replica{
-		Id:               param.ReplicaId,
-		Size:             param.Size,
-		MaxInstanceNum:   make([]uint64, param.Size),
-		ProposeNum:       1, // instance.id start from 1
-		ProposeChan:      make(chan *proposeRequest, 1024),
-		BatchInterval:    param.BatchInterval,
-		TimeoutInterval:  param.TimeoutInterval,
-		CheckpointCycle:  param.CheckpointCycle,
-		ExecutedUpTo:     make([]uint64, param.Size),
-		InstanceMatrix:   make([][]*Instance, param.Size),
-		StateMachine:     param.StateMachine,
-		Epoch:            epochStart,
-		MessageEventChan: make(chan *message.MessageEvent, 1024),
-		sccStack:         list.New(),
-		Addrs:            param.Addrs,
+		Id:              param.ReplicaId,
+		Size:            param.Size,
+		MaxInstanceNum:  make([]uint64, param.Size),
+		ProposeNum:      1, // instance.id start from 1
+		ProposeChan:     make(chan *proposeRequest, 1024),
+		BatchInterval:   param.BatchInterval,
+		TimeoutInterval: param.TimeoutInterval,
+		CheckpointCycle: param.CheckpointCycle,
+		ExecutedUpTo:    make([]uint64, param.Size),
+		InstanceMatrix:  make([][]*Instance, param.Size),
+		StateMachine:    param.StateMachine,
+		Epoch:           epochStart,
+		MessageChan:     make(chan message.Message, 1024),
+		sccStack:        list.New(),
+		Addrs:           param.Addrs,
+		Transporter:     param.Transporter,
 
 		executeTicker: time.NewTicker(param.ExecuteInterval),
 		timeoutTicker: time.NewTicker(param.TimeoutInterval),
@@ -190,6 +190,8 @@ func New(param *Param) (*Replica, error) {
 		stop:           make(chan struct{}),
 		enableBatching: param.EnableBatching,
 	}
+
+	r.Transporter.RegisterChannel(r.MessageChan)
 
 	if !r.enableBatching {
 		// stop ticker
@@ -202,34 +204,16 @@ func New(param *Param) (*Replica, error) {
 		r.ExecutedUpTo[i] = conflictNotFound
 	}
 
-	r.Transporter, err = NewNetworkTransporter(param.Addrs, r.Id, r.Size)
-	if err != nil {
-		return nil, err
-	}
-
 	return r, nil
 }
 
 // Start running the replica. It shouldn't stop at any time.
 func (r *Replica) Start() error {
-	addr, err := net.ResolveUDPAddr("udp", r.Addrs[r.Id])
-	if err != nil {
-		return err
-	}
-
-	r.sock, err = net.ListenUDP("udp", addr)
-	if err != nil {
-		return err
-	}
-
-	log.Println("Listening on port", r.Addrs[r.Id])
-
 	go r.eventLoop()
 	go r.executeLoop()
 	go r.proposeLoop()
-	go r.timeoutLoop()
-	r.Transporter.Start()
-	return nil
+	//go r.timeoutLoop()
+	return r.Transporter.Start()
 }
 
 func (r *Replica) stopTickers() {
@@ -269,21 +253,18 @@ func (r *Replica) checkTimeout() {
 			}
 
 			if instance[j].isTimeout() {
-				r.MessageEventChan <- r.makeTimeout(uint8(i), j)
+				r.MessageChan <- r.makeTimeout(uint8(i), j)
 			}
 		}
 	}
 }
 
-func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *message.MessageEvent {
-	return &message.MessageEvent{
-		From: r.Id,
-		Message: &message.Timeout{
-			ReplicaId:  rowId,
-			InstanceId: instanceId,
-		},
+func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) message.Message {
+	return &message.Timeout{
+		ReplicaId:  rowId,
+		InstanceId: instanceId,
+		From:       r.Id,
 	}
-	return nil
 }
 
 // handling events
@@ -293,8 +274,8 @@ func (r *Replica) eventLoop() {
 		select {
 		case <-r.stop:
 			return
-		case mevent := <-r.MessageEventChan:
-			r.dispatch(mevent)
+		case msg := <-r.MessageChan:
+			r.dispatch(msg)
 		}
 	}
 }
@@ -356,11 +337,6 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 	// record the current instance id
 	iid := r.ProposeNum
 	proposal := message.NewPropose(r.Id, iid, cmds)
-	mevent := &message.MessageEvent{
-		From:    r.Id,
-		MsgType: message.ProposeMsg,
-		Message: proposal,
-	}
 
 	// update propose num
 	r.ProposeNum++
@@ -370,7 +346,7 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 
 	// TODO: we could use another channel
 	// and with synchronization to improve throughput
-	r.MessageEventChan <- mevent
+	r.MessageChan <- proposal
 
 	// wait for the construction of instance and
 	// send back its id
@@ -386,13 +362,12 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 // *****************************
 
 // This function is responsible for communicating with instance processing.
-func (r *Replica) dispatch(mevent *message.MessageEvent) {
-	eventMsg := mevent.Message
-	replicaId := eventMsg.Replica()
-	instanceId := eventMsg.Instance()
+func (r *Replica) dispatch(msg message.Message) {
+	replicaId := msg.Replica()
+	instanceId := msg.Instance()
 
 	v1Log.Infof("Replica[%v]: recv message[%s], from Replica[%v]\n",
-		r.Id, eventMsg.String(), mevent.From)
+		r.Id, msg.String(), msg.Sender())
 
 	if instanceId <= conflictNotFound {
 		panic("")
@@ -400,7 +375,7 @@ func (r *Replica) dispatch(mevent *message.MessageEvent) {
 
 	if r.InstanceMatrix[replicaId][instanceId] == nil {
 		r.InstanceMatrix[replicaId][instanceId] = NewInstance(r, replicaId, instanceId)
-		if p, ok := eventMsg.(*message.Propose); ok {
+		if p, ok := msg.(*message.Propose); ok {
 			// send back a signal for this successfully creation
 			close(p.Created)
 		}
@@ -413,19 +388,19 @@ func (r *Replica) dispatch(mevent *message.MessageEvent) {
 		r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
 
 	var action uint8
-	var msg message.Message
+	var rep message.Message
 
 	switch i.status {
 	case nilStatus:
-		action, msg = i.nilStatusProcess(eventMsg)
+		action, rep = i.nilStatusProcess(msg)
 	case preAccepted:
-		action, msg = i.preAcceptedProcess(eventMsg)
+		action, rep = i.preAcceptedProcess(msg)
 	case accepted:
-		action, msg = i.acceptedProcess(eventMsg)
+		action, rep = i.acceptedProcess(msg)
 	case committed:
-		action, msg = i.committedProcess(eventMsg)
+		action, rep = i.committedProcess(msg)
 	case preparing:
-		action, msg = i.preparingProcess(eventMsg)
+		action, rep = i.preparingProcess(msg)
 	default:
 		panic("")
 	}
@@ -443,16 +418,16 @@ func (r *Replica) dispatch(mevent *message.MessageEvent) {
 		return
 	case replyAction:
 		v1Log.Infof("Replica[%v]: send message[%s], to Replica[%v]\n\n\n",
-			r.Id, msg.String(), mevent.From)
-		r.Transporter.Send(mevent.From, msg)
+			r.Id, rep.String(), msg.Sender())
+		r.Transporter.Send(msg.Sender(), rep) // send back to the sender of the message
 	case fastQuorumAction:
 		v1Log.Infof("Replica[%v]: send message[%s], to FastQuorum\n\n\n",
-			r.Id, msg.String())
-		r.Transporter.MulticastFastquorum(msg)
+			r.Id, rep.String())
+		r.Transporter.MulticastFastquorum(rep)
 	case broadcastAction:
 		v1Log.Infof("Replica[%v]: send message[%s], to Everyone\n\n\n",
-			r.Id, msg.String())
-		r.Transporter.Broadcast(msg)
+			r.Id, rep.String())
+		r.Transporter.Broadcast(rep)
 	default:
 		panic("")
 	}

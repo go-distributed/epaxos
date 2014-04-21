@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-distributed/epaxos/message"
 	"github.com/go-distributed/epaxos/test"
+	"github.com/go-distributed/epaxos/transporter"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -40,6 +41,7 @@ func commonTestlibExampleReplica() *Replica {
 		ReplicaId:    0,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(0, 5),
 	}
 	r, _ := New(param)
 	return r
@@ -50,8 +52,13 @@ func commonTestlibExampleInstance() *Instance {
 		ReplicaId:    0,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(0, 5),
 	}
-	r, _ := New(param)
+	r, err := New(param)
+	if err != nil {
+		panic(err)
+	}
+
 	i := NewInstance(r, r.Id+1, conflictNotFound+1) // make rowId different with i.replica.Id
 	return i
 }
@@ -148,6 +155,7 @@ func TestNewInstance(t *testing.T) {
 		ReplicaId:    expectedReplicaId,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(expectedReplicaId, 5),
 	}
 	r, _ := New(param)
 	i := NewInstance(r, expectedReplicaId, expectedInstanceId)
@@ -1914,7 +1922,7 @@ func TestPreAcceptedPreparingHandlePrepareReply(t *testing.T) {
 	i.enterPreparing()
 	ir := i.recoveryInfo
 
-	assert.Equal(t, ir.ballot.Number(), uint64(0))
+	assert.Equal(t, ir.ballot.GetNumber(), uint64(0))
 
 	originalBallot := ir.ballot
 	messageBallot := i.ballot.Clone()
@@ -2063,6 +2071,7 @@ func TestHandlePropose(t *testing.T) {
 		Cmds:       i.cmds,
 		Deps:       i.deps,
 		Ballot:     i.ballot,
+		From:       i.replica.Id,
 	})
 }
 

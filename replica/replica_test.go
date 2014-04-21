@@ -8,6 +8,7 @@ import (
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/message"
 	"github.com/go-distributed/epaxos/test"
+	"github.com/go-distributed/epaxos/transporter"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -18,6 +19,7 @@ func TestNewReplica(t *testing.T) {
 		ReplicaId:    3,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(3, 5),
 	}
 	r, _ := New(param)
 
@@ -42,6 +44,7 @@ func TestMakeInitialBallot(t *testing.T) {
 		ReplicaId:    3,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(3, 5),
 	}
 	r, _ := New(param)
 	r.Epoch = 3
@@ -55,6 +58,7 @@ func depsTestSetupReplica() (r *Replica, i *Instance) {
 		ReplicaId:    4,
 		Size:         5,
 		StateMachine: new(test.DummySM),
+		Transporter:  transporter.NewDummyTR(4, 5),
 	}
 	r, _ = New(param)
 	for i := 0; i < 5; i++ {
@@ -553,7 +557,7 @@ func TestNoTimeout1(t *testing.T) {
 	time.Sleep(2 * r.TimeoutInterval)
 	go r.checkTimeout()
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 		t.Fatal("shouldn't get a timeout message")
 	default:
 	}
@@ -567,7 +571,7 @@ func TestNoTimeout2(t *testing.T) {
 	time.Sleep(2 * r.TimeoutInterval)
 	go r.checkTimeout()
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 		t.Fatal("shouldn't get a timeout message for committed instance")
 	default:
 	}
@@ -583,14 +587,14 @@ func TestTimeout1(t *testing.T) {
 	time.Sleep(r.TimeoutInterval) // wait for message sending
 
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 	default:
 		t.Fatal("should get a timeout message from a uncommitted instance")
 	}
 
 	time.Sleep(r.TimeoutInterval) // wait for message sending
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 		t.Fatal("should get only one timeout message from a uncommitted instance")
 	default:
 	}
@@ -618,13 +622,10 @@ func TestTimeout2(t *testing.T) {
 				continue
 			}
 			select {
-			case msg := <-r.MessageEventChan:
-				assert.Equal(t, msg, &message.MessageEvent{
-					From: r.Id,
-					Message: &message.Timeout{
-						ReplicaId:  uint8(i),
-						InstanceId: uint64(j),
-					},
+			case msg := <-r.MessageChan:
+				assert.Equal(t, msg, &message.Timeout{
+					ReplicaId:  uint8(i),
+					InstanceId: uint64(j),
 				})
 			default:
 				t.Fatal("should get timeout messages")
@@ -633,7 +634,7 @@ func TestTimeout2(t *testing.T) {
 	}
 	time.Sleep(r.TimeoutInterval) // wait for message sending
 	select {
-	case <-r.MessageEventChan:
+	case <-r.MessageChan:
 		t.Fatal("shouldn't get more timeout messages")
 	default:
 	}
@@ -648,6 +649,7 @@ func TestProposeIdNoBatch(t *testing.T) {
 		Size:           5,
 		StateMachine:   new(test.DummySM),
 		EnableBatching: false,
+		Transporter:    transporter.NewDummyTR(0, 5),
 	}
 	r, _ := New(param)
 
@@ -685,6 +687,7 @@ func TestProposeIdWithBatch(t *testing.T) {
 		StateMachine:   new(test.DummySM),
 		EnableBatching: true,
 		BatchInterval:  time.Millisecond * 50,
+		Transporter:    transporter.NewDummyTR(0, 5),
 	}
 	r, _ := New(param)
 

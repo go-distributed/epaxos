@@ -1,6 +1,7 @@
 package message
 
 type Message interface {
+	Sender() uint8
 	Type() uint8
 	Content() interface{}
 	Replica() uint8
@@ -31,10 +32,4 @@ func MessageTypeString(m Message) string {
 	default:
 		panic("")
 	}
-}
-
-type MessageEvent struct {
-	From    uint8
-	MsgType uint8
-	Message Message
 }

@@ -8,9 +8,9 @@ import (
 
 func TestNewAndInitialBallot(t *testing.T) {
 	b := NewBallot(2, 3, 4)
-	assert.Equal(t, b.epoch, uint32(2))
-	assert.Equal(t, b.number, uint64(3))
-	assert.Equal(t, b.replicaId, uint8(4))
+	assert.Equal(t, b.Epoch, uint32(2))
+	assert.Equal(t, b.Number, uint64(3))
+	assert.Equal(t, b.ReplicaId, uint8(4))
 }
 
 func TestBallotToUint64(t *testing.T) {
@@ -26,14 +26,14 @@ func TestBallotToUint64(t *testing.T) {
 
 func TestBallotFromUint64(t *testing.T) {
 	b := NewBallot(2, 2, 2)
-	assert.Equal(t, b.epoch, uint32(2))
-	assert.Equal(t, b.number, uint64(2))
-	assert.Equal(t, b.replicaId, uint8(2))
+	assert.Equal(t, b.Epoch, uint32(2))
+	assert.Equal(t, b.Number, uint64(2))
+	assert.Equal(t, b.ReplicaId, uint8(2))
 
 	b.FromUint64((1 << (ballotReplicaIdWidth + ballotNumberWidth)) | (1 << ballotReplicaIdWidth) | 1)
-	assert.Equal(t, b.epoch, uint32(1))
-	assert.Equal(t, b.number, uint64(1))
-	assert.Equal(t, b.replicaId, uint8(1))
+	assert.Equal(t, b.Epoch, uint32(1))
+	assert.Equal(t, b.Number, uint64(1))
+	assert.Equal(t, b.ReplicaId, uint8(1))
 }
 
 func TestBallotCompare(t *testing.T) {
@@ -85,23 +85,23 @@ func TestBallotCompare(t *testing.T) {
 func TestIncNumber(t *testing.T) {
 	b := NewBallot(2, 34, 4)
 	b.IncNumber()
-	assert.Equal(t, b.epoch, uint32(2))
-	assert.Equal(t, b.Number(), uint64(35))
-	assert.Equal(t, b.replicaId, uint8(4))
+	assert.Equal(t, b.Epoch, uint32(2))
+	assert.Equal(t, b.Number, uint64(35))
+	assert.Equal(t, b.ReplicaId, uint8(4))
 }
 
 func TestSetReplicaId(t *testing.T) {
 	b := NewBallot(2, 34, 4)
-	assert.Equal(t, b.replicaId, uint8(4))
+	assert.Equal(t, b.ReplicaId, uint8(4))
 
 	b.SetReplicaId(6)
-	assert.Equal(t, b.replicaId, uint8(6))
+	assert.Equal(t, b.ReplicaId, uint8(6))
 }
 
 func TestIncNumClone(t *testing.T) {
 	b := NewBallot(2, 34, 4)
 	c := b.IncNumClone()
-	assert.Equal(t, c.Number(), uint64(35))
+	assert.Equal(t, c.Number, uint64(35))
 }
 
 func TestBallotClone(t *testing.T) {
@@ -117,7 +117,7 @@ func TestBallotClone(t *testing.T) {
 
 func TestBallotEpoch(t *testing.T) {
 	b := NewBallot(2, 33, 4)
-	assert.Equal(t, b.Epoch(), uint8(2))
+	assert.Equal(t, b.GetEpoch(), uint8(2))
 }
 
 func TestBallotIsInitialBallot(t *testing.T) {
@@ -128,5 +128,5 @@ func TestBallotIsInitialBallot(t *testing.T) {
 func TestBallotSetNumber(t *testing.T) {
 	b := NewBallot(1, 2, 3)
 	b.SetNumber(4)
-	assert.Equal(t, b.number, uint64(4))
+	assert.Equal(t, b.GetNumber(), uint64(4))
 }
