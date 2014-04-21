@@ -13,7 +13,6 @@ package replica
 
 import (
 	"container/list"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -25,7 +24,7 @@ import (
 	"github.com/golang/glog"
 
 	"github.com/go-distributed/epaxos"
-	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/message"
 )
 
 // #if test
@@ -84,10 +83,10 @@ type Replica struct {
 	InstanceMatrix   [][]*Instance
 	StateMachine     epaxos.StateMachine
 	Epoch            uint32
-	MessageEventChan chan *MessageEvent
+	MessageEventChan chan *message.MessageEvent
 	sock             io.ReadWriteCloser
 	Addrs            []string
-	Transporter
+	Transporter      epaxos.Transporter
 
 	// tarjan SCC
 	sccStack   *list.List
@@ -120,19 +119,13 @@ type Param struct {
 }
 
 type proposeRequest struct {
-	cmds data.Commands
+	cmds message.Commands
 	id   chan uint64
 }
 
-type MessageEvent struct {
-	From    uint8
-	MsgType uint8
-	Message Message
-}
-
-func newProposeRequest(command ...data.Command) *proposeRequest {
+func newProposeRequest(command ...message.Command) *proposeRequest {
 	return &proposeRequest{
-		cmds: data.Commands(command),
+		cmds: message.Commands(command),
 		id:   make(chan uint64, 1), // avoid blocking
 	}
 }
@@ -185,7 +178,7 @@ func New(param *Param) (*Replica, error) {
 		InstanceMatrix:   make([][]*Instance, param.Size),
 		StateMachine:     param.StateMachine,
 		Epoch:            epochStart,
-		MessageEventChan: make(chan *MessageEvent, 1024),
+		MessageEventChan: make(chan *message.MessageEvent, 1024),
 		sccStack:         list.New(),
 		Addrs:            param.Addrs,
 
@@ -231,11 +224,11 @@ func (r *Replica) Start() error {
 
 	log.Println("Listening on port", r.Addrs[r.Id])
 
-	go r.recvLoop()
 	go r.eventLoop()
 	go r.executeLoop()
 	go r.proposeLoop()
 	go r.timeoutLoop()
+	r.Transporter.Start()
 	return nil
 }
 
@@ -248,49 +241,7 @@ func (r *Replica) stopTickers() {
 func (r *Replica) Stop() {
 	close(r.stop)
 	r.stopTickers()
-	r.sock.Close()
-}
-
-// TODO: move to transporter
-func (r *Replica) recvLoop() {
-	data := make([]byte, 1024*16) // TODO: hard code
-
-	for {
-		select {
-		case <-r.stop:
-			return
-		default:
-		}
-
-		rlen, err := r.sock.Read(data)
-		if err != nil {
-			log.Println("listener is closed:", err)
-			return
-		}
-
-		go func(b []byte, n int) {
-			msg, err := messageProto(b[1])
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			err = xml.Unmarshal(b[2:n], msg)
-			if err != nil {
-				log.Println("Unmarshal", err)
-				return
-			}
-
-			msgEvent := &MessageEvent{
-				From:    b[0],
-				MsgType: b[1],
-				Message: msg,
-			}
-			log.Printf("%v\n", msgEvent)
-
-			r.MessageEventChan <- msgEvent
-		}(data, rlen)
-	}
+	r.Transporter.Stop()
 }
 
 func (r *Replica) timeoutLoop() {
@@ -324,10 +275,10 @@ func (r *Replica) checkTimeout() {
 	}
 }
 
-func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *MessageEvent {
-	return &MessageEvent{
+func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *message.MessageEvent {
+	return &message.MessageEvent{
 		From: r.Id,
-		Message: &data.Timeout{
+		Message: &message.Timeout{
 			ReplicaId:  rowId,
 			InstanceId: instanceId,
 		},
@@ -336,6 +287,7 @@ func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) *MessageEvent {
 }
 
 // handling events
+// TODO: differentiate internal and external messages
 func (r *Replica) eventLoop() {
 	for {
 		select {
@@ -380,7 +332,7 @@ func (r *Replica) proposeLoop() {
 }
 
 // return the channel containing the internal instance id
-func (r *Replica) Propose(cmds ...data.Command) chan uint64 {
+func (r *Replica) Propose(cmds ...message.Command) chan uint64 {
 	req := newProposeRequest(cmds...)
 	r.ProposeChan <- req
 	return req.id
@@ -396,17 +348,17 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 	}
 
 	// copy commands
-	cmds := make([]data.Command, 0)
+	cmds := make([]message.Command, 0)
 	for i := range br {
 		cmds = append(cmds, br[i].cmds...)
 	}
 
 	// record the current instance id
 	iid := r.ProposeNum
-	proposal := data.NewPropose(r.Id, iid, cmds)
-	mevent := &MessageEvent{
+	proposal := message.NewPropose(r.Id, iid, cmds)
+	mevent := &message.MessageEvent{
 		From:    r.Id,
-		MsgType: data.ProposeMsg,
+		MsgType: message.ProposeMsg,
 		Message: proposal,
 	}
 
@@ -434,7 +386,7 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 // *****************************
 
 // This function is responsible for communicating with instance processing.
-func (r *Replica) dispatch(mevent *MessageEvent) {
+func (r *Replica) dispatch(mevent *message.MessageEvent) {
 	eventMsg := mevent.Message
 	replicaId := eventMsg.Replica()
 	instanceId := eventMsg.Instance()
@@ -448,7 +400,7 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 
 	if r.InstanceMatrix[replicaId][instanceId] == nil {
 		r.InstanceMatrix[replicaId][instanceId] = NewInstance(r, replicaId, instanceId)
-		if p, ok := eventMsg.(*data.Propose); ok {
+		if p, ok := eventMsg.(*message.Propose); ok {
 			// send back a signal for this successfully creation
 			close(p.Created)
 		}
@@ -461,7 +413,7 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 		r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
 
 	var action uint8
-	var msg Message
+	var msg message.Message
 
 	switch i.status {
 	case nilStatus:
@@ -521,22 +473,22 @@ func (r *Replica) quorum() int {
 	return int(r.Size / 2)
 }
 
-func (r *Replica) makeInitialBallot() *data.Ballot {
-	return data.NewBallot(r.Epoch, 0, r.Id)
+func (r *Replica) makeInitialBallot() *message.Ballot {
+	return message.NewBallot(r.Epoch, 0, r.Id)
 }
 
-func (r *Replica) makeInitialDeps() data.Dependencies {
-	return make(data.Dependencies, r.Size)
+func (r *Replica) makeInitialDeps() message.Dependencies {
+	return make(message.Dependencies, r.Size)
 }
 
 // This func initiate a new instance, construct its commands and dependencies
 // TODO: this operation should synchronized/atomic
-func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
+func (r *Replica) initInstance(cmds message.Commands, i *Instance) {
 	if i.rowId != r.Id {
 		panic("")
 	}
 
-	deps := make(data.Dependencies, r.Size)
+	deps := make(message.Dependencies, r.Size)
 
 	for curr := range r.InstanceMatrix {
 		instances := r.InstanceMatrix[curr]
@@ -562,7 +514,7 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 // This func updates the passed in dependencies from replica[from].
 // return updated dependencies and whether the dependencies has changed.
 // TODO: this operation should synchronized/atomic
-func (r *Replica) updateInstance(cmds data.Commands, deps data.Dependencies, from uint8, i *Instance) bool {
+func (r *Replica) updateInstance(cmds message.Commands, deps message.Dependencies, from uint8, i *Instance) bool {
 	changed := false
 
 	for curr := range r.InstanceMatrix {
@@ -594,7 +546,7 @@ func (r *Replica) IsCheckpoint(n uint64) bool {
 
 // scanConflicts scans the instances from start to end (high to low).
 // return the highest instance that has conflicts with passed in cmds.
-func (r *Replica) scanConflicts(instances []*Instance, cmds data.Commands, start uint64, end uint64) uint64 {
+func (r *Replica) scanConflicts(instances []*Instance, cmds message.Commands, start uint64, end uint64) uint64 {
 	for i := start; i > end; i-- {
 		if r.IsCheckpoint(i) {
 			return i
@@ -680,7 +632,7 @@ func (r *Replica) execute(i *Instance) error {
 
 // this should be a transaction.
 func (r *Replica) executeList() error {
-	cmdsBuffer := make([]data.Command, 0)
+	cmdsBuffer := make([]message.Command, 0)
 
 	// batch all commands in the scc
 	for _, sccNodes := range r.sccResults {

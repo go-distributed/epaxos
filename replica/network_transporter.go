@@ -6,6 +6,8 @@ import (
 	"log"
 	"math/rand"
 	"net"
+
+	"github.com/go-distributed/epaxos/message"
 )
 
 type NetworkTransporter struct {
@@ -14,6 +16,8 @@ type NetworkTransporter struct {
 	FastQuorum uint8
 	All        uint8
 	Conns      []*net.UDPConn
+	ch         chan *message.MessageEvent
+	stop       chan struct{}
 }
 
 func NewNetworkTransporter(addrStrs []string,
@@ -45,11 +49,12 @@ func NewNetworkTransporter(addrStrs []string,
 		FastQuorum: size - 2,
 		All:        size - 1,
 		Conns:      conns,
+		stop:       make(chan struct{}),
 	}
 	return nt, nil
 }
 
-func (nt *NetworkTransporter) Send(to uint8, msg Message) {
+func (nt *NetworkTransporter) Send(to uint8, msg message.Message) {
 	go func() {
 		conn := nt.Conns[to]
 		if conn == nil {
@@ -71,7 +76,7 @@ func (nt *NetworkTransporter) Send(to uint8, msg Message) {
 	}()
 }
 
-func (nt *NetworkTransporter) MulticastFastquorum(msg Message) {
+func (nt *NetworkTransporter) MulticastFastquorum(msg message.Message) {
 	skip := uint8(rand.Intn(int(nt.All)))
 	if skip == nt.Self {
 		skip = nt.All - 1
@@ -85,11 +90,32 @@ func (nt *NetworkTransporter) MulticastFastquorum(msg Message) {
 	}
 }
 
-func (nt *NetworkTransporter) Broadcast(msg Message) {
+func (nt *NetworkTransporter) Broadcast(msg message.Message) {
 	for i := uint8(0); i < nt.All; i++ {
 		if i == nt.Self {
 			continue
 		}
 		nt.Send(i, msg)
 	}
+}
+
+func (nt *NetworkTransporter) RegisterChannel(ch chan *message.MessageEvent) {
+	nt.ch = ch
+}
+
+func (nt *NetworkTransporter) Start() {
+	for {
+		select {
+		case <-nt.stop:
+			return
+		default:
+		}
+
+		// receive message
+	}
+}
+
+func (nt *NetworkTransporter) Stop() {
+	close(nt.stop)
+	// stop network
 }

@@ -11,10 +11,11 @@ type DummyTransporter struct {
 	All        uint8
 }
 
+// non-block
 func (tr *DummyTransporter) Send(to uint8, msg replica.Message) {
 	go func() {
 		r := tr.Nodes[to]
-		r.MessageEventChan <- &replica.MessageEvent{tr.Self, msg.Type(), msg}
+		r.MessageEventChan <- msg
 	}()
 }
 
@@ -38,4 +39,13 @@ func (tr *DummyTransporter) Broadcast(msg replica.Message) {
 		}
 		tr.Send(uint8(i), msg)
 	}
+}
+
+func (tr *DummyTransporter) RegisterChannel(ch chan *replica.MessageEvent) {
+}
+
+func (tr *DummyTransporter) Start() {
+}
+
+func (tr *DummyTransporter) Stop() {
 }

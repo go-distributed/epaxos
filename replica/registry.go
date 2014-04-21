@@ -4,35 +4,35 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/message"
 )
 
 var registry map[uint8]reflect.Type
 
 func init() {
 	registry = make(map[uint8]reflect.Type)
-	registerMsgType(data.ProposeMsg, data.Propose{})
-	registerMsgType(data.PreAcceptMsg, data.PreAccept{})
-	registerMsgType(data.PreAcceptOkMsg, data.PreAcceptOk{})
-	registerMsgType(data.PreAcceptReplyMsg, data.PreAcceptReply{})
-	registerMsgType(data.AcceptMsg, data.Accept{})
-	registerMsgType(data.AcceptReplyMsg, data.AcceptReply{})
-	registerMsgType(data.CommitMsg, data.Commit{})
-	registerMsgType(data.PrepareMsg, data.Prepare{})
-	registerMsgType(data.PrepareReplyMsg, data.PrepareReply{})
-	registerMsgType(data.TimeoutMsg, data.Timeout{})
+	registerMsgType(message.ProposeMsg, message.Propose{})
+	registerMsgType(message.PreAcceptMsg, message.PreAccept{})
+	registerMsgType(message.PreAcceptOkMsg, message.PreAcceptOk{})
+	registerMsgType(message.PreAcceptReplyMsg, message.PreAcceptReply{})
+	registerMsgType(message.AcceptMsg, message.Accept{})
+	registerMsgType(message.AcceptReplyMsg, message.AcceptReply{})
+	registerMsgType(message.CommitMsg, message.Commit{})
+	registerMsgType(message.PrepareMsg, message.Prepare{})
+	registerMsgType(message.PrepareReplyMsg, message.PrepareReply{})
+	registerMsgType(message.TimeoutMsg, message.Timeout{})
 }
 
 func registerMsgType(typ uint8, msg interface{}) {
 	registry[typ] = reflect.TypeOf(msg)
 }
 
-func messageProto(typ uint8) (Message, error) {
+func messageProto(typ uint8) (message.Message, error) {
 	t, ok := registry[typ]
 	if !ok {
 		return nil, fmt.Errorf("unknown message type")
 	}
 	v := reflect.New(t)
-	msg := v.Interface().(Message)
+	msg := v.Interface().(message.Message)
 	return msg, nil
 }

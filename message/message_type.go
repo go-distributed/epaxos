@@ -1,4 +1,4 @@
-package data
+package message
 
 const (
 	ProposeMsg uint8 = iota + 1
