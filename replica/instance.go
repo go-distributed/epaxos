@@ -725,6 +725,7 @@ func (i *Instance) handlePrepare(p *message.Prepare) (action uint8, msg *message
 		Ballot:         p.Ballot.Clone(),
 		OriginalBallot: oldBallot,
 		IsFromLeader:   isFromLeader,
+		From:           i.replica.Id,
 	}
 }
 
@@ -918,7 +919,7 @@ func (i *Instance) makePreAcceptReply(ok bool, deps message.Dependencies) *messa
 	return &message.PreAcceptReply{
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
-		Deps:       deps,
+		Deps:       deps.Clone(),
 		Ballot:     i.ballot.Clone(),
 		From:       i.replica.Id,
 	}

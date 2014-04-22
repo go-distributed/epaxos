@@ -25,6 +25,7 @@ import (
 
 // #if test
 var v1Log = glog.V(0)
+var v2Log = glog.V(0)
 
 // #else
 // var v1Log = glog.V(1)
@@ -212,7 +213,7 @@ func (r *Replica) Start() error {
 	go r.eventLoop()
 	go r.executeLoop()
 	go r.proposeLoop()
-	//go r.timeoutLoop()
+	go r.timeoutLoop()
 	return r.Transporter.Start()
 }
 
@@ -368,6 +369,9 @@ func (r *Replica) dispatch(msg message.Message) {
 
 	v1Log.Infof("Replica[%v]: recv message[%s], from Replica[%v]\n",
 		r.Id, msg.String(), msg.Sender())
+	if glog.V(0) {
+		printDependencies(msg)
+	}
 
 	if instanceId <= conflictNotFound {
 		panic("")
@@ -386,6 +390,7 @@ func (r *Replica) dispatch(msg message.Message) {
 
 	v1Log.Infof("Replica[%v]: instance[%v][%v] status before = %v, ballot = [%v]\n",
 		r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
+	v2Log.Infof("dependencies before: %v\n", i.Dependencies())
 
 	var action uint8
 	var rep message.Message
@@ -405,6 +410,7 @@ func (r *Replica) dispatch(msg message.Message) {
 		panic("")
 	}
 
+	v2Log.Infof("dependencies after: %v\n", i.Dependencies())
 	if action == noAction {
 		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v, ballot = [%v]\n\n\n",
 			r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
@@ -730,4 +736,19 @@ func (s sccNodesQueue) Less(i, j int) bool {
 		return s[i].id < s[j].id
 	}
 	return false
+}
+
+func printDependencies(msg message.Message) {
+	switch m := msg.(type) {
+	case *message.PreAccept:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	case *message.PreAcceptReply:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	case *message.Accept:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	case *message.PrepareReply:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	case *message.Commit:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	}
 }

@@ -15,7 +15,7 @@ func NewDummyTR(self uint8, size int) *DummyTransporter {
 	dm := &DummyTransporter{
 		Chs:        make([]chan message.Message, size),
 		Self:       self,
-		FastQuorum: uint8(size) - 1,
+		FastQuorum: uint8(size) - 2,
 		All:        uint8(size),
 	}
 	return dm

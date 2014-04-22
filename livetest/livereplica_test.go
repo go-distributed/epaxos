@@ -84,6 +84,16 @@ func livetestlibLogCmpForTwo(t *testing.T, a, b *replica.Replica, row int) bool 
 			continue
 		}
 
+		if a.InstanceMatrix[row][i] == nil {
+			t.Logf("WARNING: Instance doesn't exist for replica[%d]:Instance[%d][%d]",
+				a.Id, row, i)
+		}
+
+		if b.InstanceMatrix[row][i] == nil {
+			t.Logf("WARNING: Instance doesn't exist for replica[%d]:Instance[%d][%d]",
+				b.Id, row, i)
+		}
+
 		if a.InstanceMatrix[row][i].StatusString() != "Committed" {
 			t.Logf("WARNING: Instance is not committed for replica[%d]:Instance[%d][%d]",
 				a.Id, row, i)
@@ -120,7 +130,6 @@ func livetestlibLogCmpForTwo(t *testing.T, a, b *replica.Replica, row int) bool 
 // are identical.
 func livetestlibLogConsistent(t *testing.T, replicas ...*replica.Replica) bool {
 	size := int(replicas[0].Size)
-
 	for i := range replicas {
 		next := (i + 1) % size
 		for j := 0; j < size; j++ {
@@ -143,7 +152,7 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 
 	for i := 0; i < maxInstance; i++ {
 		cmds := livetestlibExampleCommands(i)
-		nodes[0].Propose(cmds...) // batching disabled
+		go nodes[0].Propose(cmds...) // batching disabled
 		allCmds[i] = cmds
 	}
 	fmt.Println("Wait 5000 millis for completion")
@@ -165,11 +174,11 @@ func Test3Replica3ProposerNoConflict(t *testing.T) {
 		for j := range nodes {
 			index := i*N + j
 			cmds := livetestlibExampleCommands(index)
-			nodes[j].Propose(cmds...) // batching disabled
+			go nodes[j].Propose(cmds...) // batching disabled
 		}
 	}
-	fmt.Println("Wait 5000 millis for completion")
-	time.Sleep(5000 * time.Millisecond)
+	fmt.Println("Wait 10000 millis for completion")
+	time.Sleep(10000 * time.Millisecond)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 }
@@ -183,11 +192,11 @@ func Test2ProposerConflict(t *testing.T) {
 	for i := 1; i < maxInstance; i++ {
 		for j := 0; j < 2; j++ {
 			cmds := livetestlibExampleCommands(i)
-			nodes[j].Propose(cmds...) // batching disabled
+			go nodes[j].Propose(cmds...) // batching disabled
 		}
 	}
-	fmt.Println("Wait 5000 millis for completion")
-	time.Sleep(5000 * time.Millisecond)
+	fmt.Println("Wait 10000 millis for completion")
+	time.Sleep(10000 * time.Millisecond)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 
@@ -217,11 +226,11 @@ func Test3ProposerConflict(t *testing.T) {
 	for i := 1; i < maxInstance; i++ {
 		for j := 0; j < 3; j++ {
 			cmds := livetestlibExampleCommands(i)
-			nodes[j].Propose(cmds...) //batching disabled
+			go nodes[j].Propose(cmds...) //batching disabled
 		}
 	}
-	fmt.Println("Wait 5000 millis for completion")
-	time.Sleep(5000 * time.Millisecond)
+	fmt.Println("Wait 10000 millis for completion")
+	time.Sleep(10000 * time.Millisecond)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 
