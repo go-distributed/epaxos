@@ -191,7 +191,6 @@ func New(param *Param) (*Replica, error) {
 		stop:           make(chan struct{}),
 		enableBatching: param.EnableBatching,
 	}
-
 	r.Transporter.RegisterChannel(r.MessageChan)
 
 	if !r.enableBatching {
