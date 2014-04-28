@@ -59,7 +59,7 @@ func NewUDPTransporter(addrStrs []string,
 		Addrs:      addrs,
 		Self:       self,
 		FastQuorum: uint8(size) - 2,
-		All:        uint8(size) - 1,
+		All:        uint8(size),
 		Conns:      conns,
 		stop:       make(chan struct{}),
 		encs:       make([]*gob.Encoder, size),
@@ -80,7 +80,7 @@ func (nt *UDPTransporter) Send(to uint8, msg message.Message) {
 func (nt *UDPTransporter) MulticastFastquorum(msg message.Message) {
 	skip := uint8(rand.Intn(int(nt.All)))
 	if skip == nt.Self {
-		skip = nt.All - 1
+		skip = (skip + 1) % nt.All
 	}
 
 	for i := uint8(0); i < nt.All; i++ {
