@@ -72,7 +72,7 @@ func (nt *UDPTransporter) Send(to uint8, msg message.Message) {
 	go func() {
 		err := nt.encs[to].Encode(&msg)
 		if err != nil {
-			glog.Warning("Encoding error", err)
+			glog.Warning("Encoding error ", err)
 		}
 	}()
 }
@@ -132,7 +132,8 @@ func (nt *UDPTransporter) Start() error {
 			// receive message
 			err := nt.dec.Decode(&msg)
 			if err != nil {
-				glog.Warning("Decoding error", err)
+				glog.Warning("Decoding error ", err)
+				continue
 			}
 			nt.ch <- msg
 		}
