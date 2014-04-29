@@ -241,6 +241,7 @@ func (r *Replica) Stop() {
 	close(r.stop)
 	r.stopTickers()
 	r.Transporter.Stop()
+	r.store.Close()
 }
 
 func (r *Replica) timeoutLoop() {
@@ -771,9 +772,10 @@ func printDependencies(msg message.Message) {
 func (r *Replica) MarshalSingleInstance(inst *Instance) error {
 	var buffer bytes.Buffer
 
-	key := fmt.Sprintf("%v-%v-%v", r.Id, inst.rowId, inst.id)
+	p := inst.Pack()
+	key := fmt.Sprintf("%v-%v-%v", r.Id, p.RowId, p.Id)
 	enc := gob.NewEncoder(&buffer)
-	err := enc.Encode(inst)
+	err := enc.Encode(p)
 	if err != nil {
 		return err
 	}
@@ -781,29 +783,32 @@ func (r *Replica) MarshalSingleInstance(inst *Instance) error {
 }
 
 func (r *Replica) UnmarshalSingleInstance(rowId uint8, instanceId uint64) (*Instance, error) {
-	var inst Instance
+	inst := NewInstance(r, rowId, instanceId)
+	var p PackedInstance
 
-	key := fmt.Sprintf("%v-%v-%v", r.Id, rowId, instanceId)
+	key := fmt.Sprintf("%v-%v-%v", r.Id, inst.rowId, inst.id)
 	b, err := r.store.Get(key)
 	if err != nil {
 		return nil, err
 	}
 	buffer := bytes.NewBuffer(b)
 	dec := gob.NewDecoder(buffer)
-	err = dec.Decode(&inst)
+	err = dec.Decode(&p)
 	if err != nil {
 		return nil, err
 	}
-	return &inst, nil
+	inst.Unpack(&p)
+	return inst, nil
 }
 
 func (r *Replica) MarshalInstances(insts ...*Instance) error {
 	kvs := make([]*epaxos.KVpair, len(insts))
 	for i := range insts {
 		var buffer bytes.Buffer
+		p := insts[i].Pack()
 		key := fmt.Sprintf("%v-%v-%v", r.Id, insts[i].rowId, insts[i].id)
 		enc := gob.NewEncoder(&buffer)
-		err := enc.Encode(insts[i])
+		err := enc.Encode(p)
 		if err != nil {
 			return err
 		}
