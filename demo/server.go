@@ -17,6 +17,7 @@ var _ = fmt.Printf
 
 const (
 	chars = "ABCDEFG"
+	prepareInterval = 5 // 5 seconds
 )
 
 type Voter struct {
@@ -62,15 +63,20 @@ func main() {
 		Transporter:  tr,
 	}
 
+	fmt.Println("====== Spawn new replica ======")
 	r, err := replica.New(param)
 	if err != nil {
 		glog.Fatal(err)
 	}
 
+	fmt.Println("Done!")
+	fmt.Printf("Wait %d seconds to start\n", prepareInterval)
+	time.Sleep(prepareInterval * time.Second)
 	err = r.Start()
 	if err != nil {
 		glog.Fatal(err)
 	}
+	fmt.Println("====== start ======")
 
 	rand.Seed(time.Now().UTC().UnixNano())
 	for {
