@@ -9,5 +9,5 @@ type Persistent interface {
 	Put(key string, value []byte) error
 	Get(key string) ([]byte, error)
 	Delete(key string) error
-	BatchPut(kvs ...*KVpair) error
+	BatchPut(kvs []*KVpair) error
 }

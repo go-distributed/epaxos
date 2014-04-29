@@ -95,6 +95,26 @@ type RecoveryInfo struct {
 	formerStatus uint8
 }
 
+type PackedRecoveryInfo struct {
+	Ballot       *message.Ballot
+	Cmds         message.Commands
+	Deps         message.Dependencies
+	Status       uint8
+	FormerStatus uint8
+}
+
+// This is for marshal/unmarshaling the instance
+type PackedInstance struct {
+	Cmds               message.Commands
+	Deps               message.Dependencies
+	Status             uint8
+	Ballot             *message.Ballot
+	RowId              uint8
+	Id                 uint64
+	Executed           bool
+	PackedRecoveryInfo *PackedRecoveryInfo
+}
+
 // ****************************
 // **** NEW INSTANCE **********
 // ****************************
@@ -1093,5 +1113,45 @@ func (i *Instance) StatusString() string {
 		return "Preparing"
 	default:
 		panic("")
+	}
+}
+
+func (i *Instance) Pack() *PackedInstance {
+	return &PackedInstance{
+		Cmds:     i.cmds.Clone(),
+		Deps:     i.deps.Clone(),
+		Status:   i.status,
+		Ballot:   i.ballot.Clone(),
+		RowId:    i.rowId,
+		Id:       i.id,
+		Executed: i.executed,
+		PackedRecoveryInfo: &PackedRecoveryInfo{
+			Ballot:       i.recoveryInfo.ballot.Clone(),
+			Cmds:         i.recoveryInfo.cmds.Clone(),
+			Deps:         i.recoveryInfo.deps.Clone(),
+			Status:       i.recoveryInfo.status,
+			FormerStatus: i.recoveryInfo.formerStatus,
+		},
+	}
+}
+
+func (i *Instance) Unpack(p *PackedInstance) {
+	i.cmds = p.Cmds.Clone()
+	i.deps = p.Deps.Clone()
+	i.status = p.Status
+	i.ballot = p.Ballot.Clone()
+	i.rowId = p.RowId
+	i.id = p.Id
+	i.executed = p.Executed
+
+	if i.isAtStatus(preparing) {
+		ri := i.recoveryInfo
+		pr := p.PackedRecoveryInfo
+
+		ri.ballot = pr.Ballot.Clone()
+		ri.cmds = pr.Cmds.Clone()
+		ri.deps = pr.Deps.Clone()
+		ri.status = pr.Status
+		ri.formerStatus = pr.FormerStatus
 	}
 }

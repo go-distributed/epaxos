@@ -46,7 +46,7 @@ func (l *LevelDB) Delete(key string) error {
 	return l.ldb.Delete([]byte(key), l.wsync)
 }
 
-func (l *LevelDB) BatchPut(kvs ...*epaxos.KVpair) error {
+func (l *LevelDB) BatchPut(kvs []*epaxos.KVpair) error {
 	b := new(leveldb.Batch)
 	for i := range kvs {
 		b.Set([]byte(kvs[i].Key), kvs[i].Value)

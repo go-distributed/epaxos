@@ -46,16 +46,17 @@ func TestBatchPut(t *testing.T) {
 		assert.NoError(t, l.Drop())
 	}()
 
-	kv1 := &epaxos.KVpair{
+	kvs := make([]*epaxos.KVpair, 2)
+	kvs[0] = &epaxos.KVpair{
 		Key:   "hello",
 		Value: []byte("world"),
 	}
-	kv2 := &epaxos.KVpair{
+	kvs[1] = &epaxos.KVpair{
 		Key:   "epaxos",
 		Value: []byte("rocks"),
 	}
 
-	assert.NoError(t, l.BatchPut(kv1, kv2))
+	assert.NoError(t, l.BatchPut(kvs))
 	v, err := l.Get("hello")
 	assert.NoError(t, err)
 	assert.Equal(t, v, []byte("world"))

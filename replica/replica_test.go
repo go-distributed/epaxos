@@ -717,3 +717,19 @@ func TestProposeIdWithBatch(t *testing.T) {
 		assert.Equal(t, <-resultIDs[i], expectIDs[i])
 	}
 }
+
+// test persistent store
+func TestMarshalSingleInstance(t *testing.T) {
+	param := &Param{
+		ReplicaId:      0,
+		Size:           3,
+		StateMachine:   new(test.DummySM),
+		EnableBatching: true,
+		BatchInterval:  time.Millisecond * 50,
+		Transporter:    transporter.NewDummyTR(0, 5),
+	}
+	r, _ := New(param)
+
+	inst := commonTestlibExampleAcceptedInstance()
+	assert.NoError(t, r.MarshalSingleInstance(inst))
+}

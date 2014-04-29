@@ -12,7 +12,9 @@ package replica
 // - This is used to decrease the size of conflict scanning space.
 
 import (
+	"bytes"
 	"container/list"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"sort"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/message"
+	"github.com/go-distributed/epaxos/persistent"
 	"github.com/golang/glog"
 )
 
@@ -100,6 +103,9 @@ type Replica struct {
 	// controllers
 	enableBatching bool
 	stop           chan struct{}
+
+	// persistent store
+	store *persistent.LevelDB
 }
 
 type Param struct {
@@ -165,6 +171,7 @@ func New(param *Param) (*Replica, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	r := &Replica{
 		Id:              param.ReplicaId,
 		Size:            param.Size,
@@ -191,6 +198,14 @@ func New(param *Param) (*Replica, error) {
 		stop:           make(chan struct{}),
 		enableBatching: param.EnableBatching,
 	}
+
+	path := fmt.Sprintf("%s-%d", "/tmp/test", r.Id)
+	store, err := persistent.NewLevelDB(path)
+	if err != nil {
+		return nil, err
+	}
+
+	r.store = store
 	r.Transporter.RegisterChannel(r.MessageChan)
 
 	if !r.enableBatching {
@@ -750,4 +765,52 @@ func printDependencies(msg message.Message) {
 	case *message.Commit:
 		v2Log.Infof("dependencies: %v\n", m.Deps)
 	}
+}
+
+// marshal and unmarshal the Instance
+func (r *Replica) MarshalSingleInstance(inst *Instance) error {
+	var buffer bytes.Buffer
+
+	key := fmt.Sprintf("%v-%v-%v", r.Id, inst.rowId, inst.id)
+	enc := gob.NewEncoder(&buffer)
+	err := enc.Encode(inst)
+	if err != nil {
+		return err
+	}
+	return r.store.Put(key, buffer.Bytes())
+}
+
+func (r *Replica) UnmarshalSingleInstance(rowId uint8, instanceId uint64) (*Instance, error) {
+	var inst Instance
+
+	key := fmt.Sprintf("%v-%v-%v", r.Id, rowId, instanceId)
+	b, err := r.store.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	buffer := bytes.NewBuffer(b)
+	dec := gob.NewDecoder(buffer)
+	err = dec.Decode(&inst)
+	if err != nil {
+		return nil, err
+	}
+	return &inst, nil
+}
+
+func (r *Replica) MarshalInstances(insts ...*Instance) error {
+	kvs := make([]*epaxos.KVpair, len(insts))
+	for i := range insts {
+		var buffer bytes.Buffer
+		key := fmt.Sprintf("%v-%v-%v", r.Id, insts[i].rowId, insts[i].id)
+		enc := gob.NewEncoder(&buffer)
+		err := enc.Encode(insts[i])
+		if err != nil {
+			return err
+		}
+		kvs[i] = &epaxos.KVpair{
+			Key:   key,
+			Value: buffer.Bytes(),
+		}
+	}
+	return r.store.BatchPut(kvs)
 }

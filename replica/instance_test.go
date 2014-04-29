@@ -2911,3 +2911,66 @@ func assertEqualInstance(t *testing.T, a, b *Instance) {
 	assert.Equal(t, a.sccIndex, b.sccIndex)
 	assert.Equal(t, a.sccLowlink, b.sccLowlink)
 }
+
+// Test packing
+func TestPackNormalInstance(t *testing.T) {
+	i := commonTestlibExampleAcceptedInstance()
+	p := i.Pack()
+	assert.Equal(t, i.cmds, p.Cmds)
+	assert.Equal(t, i.deps, p.Deps)
+	assert.Equal(t, i.status, p.Status)
+	assert.Equal(t, i.ballot, p.Ballot)
+	assert.Equal(t, i.rowId, p.RowId)
+	assert.Equal(t, i.id, p.Id)
+	assert.Equal(t, i.executed, p.Executed)
+}
+
+func TestPackPreparingInstance(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	p := i.Pack()
+	assert.Equal(t, i.cmds, p.Cmds)
+	assert.Equal(t, i.deps, p.Deps)
+	assert.Equal(t, i.status, p.Status)
+	assert.Equal(t, i.ballot, p.Ballot)
+	assert.Equal(t, i.rowId, p.RowId)
+	assert.Equal(t, i.id, p.Id)
+	assert.Equal(t, i.executed, p.Executed)
+	assert.Equal(t, i.recoveryInfo.ballot, p.PackedRecoveryInfo.Ballot)
+	assert.Equal(t, i.recoveryInfo.cmds, p.PackedRecoveryInfo.Cmds)
+	assert.Equal(t, i.recoveryInfo.deps, p.PackedRecoveryInfo.Deps)
+	assert.Equal(t, i.recoveryInfo.status, p.PackedRecoveryInfo.Status)
+	assert.Equal(t, i.recoveryInfo.formerStatus, p.PackedRecoveryInfo.FormerStatus)
+}
+
+func TestUnpackNormalInstance(t *testing.T) {
+	i := commonTestlibExampleAcceptedInstance()
+	p := i.Pack()
+	inst := NewInstance(i.replica, i.rowId, i.id)
+	inst.Unpack(p)
+	assert.Equal(t, i.cmds, inst.cmds)
+	assert.Equal(t, i.deps, inst.deps)
+	assert.Equal(t, i.status, inst.status)
+	assert.Equal(t, i.ballot, inst.ballot)
+	assert.Equal(t, i.rowId, inst.rowId)
+	assert.Equal(t, i.id, inst.id)
+	assert.Equal(t, i.executed, inst.executed)
+}
+
+func TestUnpackPreparingInstance(t *testing.T) {
+	i := commonTestlibExamplePreparingInstance()
+	p := i.Pack()
+	inst := NewInstance(i.replica, i.rowId, i.id)
+	inst.Unpack(p)
+	assert.Equal(t, i.cmds, inst.cmds)
+	assert.Equal(t, i.deps, inst.deps)
+	assert.Equal(t, i.status, inst.status)
+	assert.Equal(t, i.ballot, inst.ballot)
+	assert.Equal(t, i.rowId, inst.rowId)
+	assert.Equal(t, i.id, inst.id)
+	assert.Equal(t, i.executed, inst.executed)
+	assert.Equal(t, i.recoveryInfo.ballot, inst.recoveryInfo.ballot)
+	assert.Equal(t, i.recoveryInfo.cmds, inst.recoveryInfo.cmds)
+	assert.Equal(t, i.recoveryInfo.deps, inst.recoveryInfo.deps)
+	assert.Equal(t, i.recoveryInfo.status, inst.recoveryInfo.status)
+	assert.Equal(t, i.recoveryInfo.formerStatus, inst.recoveryInfo.formerStatus)
+}
