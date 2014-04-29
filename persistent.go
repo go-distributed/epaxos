@@ -1,9 +1,15 @@
 package epaxos
 
+import (
+	"errors"
+)
+
 type KVpair struct {
 	Key   string
 	Value []byte
 }
+
+var ErrorNotFound = errors.New("persistent: not found")
 
 type Persistent interface {
 	Put(key string, value []byte) error

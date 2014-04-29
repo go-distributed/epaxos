@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewCloseAndDrop(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test")
+	l, err := NewLevelDB("/tmp/test", false)
 	defer func() {
 		assert.NoError(t, l.Close())
 		assert.NoError(t, l.Drop())
@@ -22,7 +22,7 @@ func TestNewCloseAndDrop(t *testing.T) {
 }
 
 func TestPutAndGet(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test")
+	l, err := NewLevelDB("/tmp/test", false)
 	assert.NoError(t, err)
 
 	defer func() {
@@ -35,10 +35,13 @@ func TestPutAndGet(t *testing.T) {
 	v, err := l.Get("hello")
 	assert.NoError(t, err)
 	assert.Equal(t, v, []byte("world"))
+
+	v, err = l.Get("world")
+	assert.Equal(t, err, epaxos.ErrorNotFound)
 }
 
 func TestBatchPut(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test")
+	l, err := NewLevelDB("/tmp/test", false)
 	assert.NoError(t, err)
 
 	defer func() {
