@@ -12,7 +12,9 @@ package replica
 // - This is used to decrease the size of conflict scanning space.
 
 import (
+	"bytes"
 	"container/list"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"sort"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/go-distributed/epaxos"
 	"github.com/go-distributed/epaxos/message"
+	"github.com/go-distributed/epaxos/persistent"
 	"github.com/golang/glog"
 )
 
@@ -66,6 +69,14 @@ const defaultStartPort = 8080
 // ***** TYPE STRUCT **********
 // ****************************
 
+type PackedReplica struct {
+	Id             uint8
+	Size           uint8
+	MaxInstanceNum []uint64
+	ExecutedUpTo   []uint64
+	ProposeNum     uint64
+}
+
 type Replica struct {
 	Id              uint8
 	Size            uint8
@@ -100,19 +111,26 @@ type Replica struct {
 	// controllers
 	enableBatching bool
 	stop           chan struct{}
+
+	// persistent store
+	enablePersistent bool
+	store            *persistent.LevelDB
 }
 
 type Param struct {
-	ReplicaId       uint8
-	Size            uint8
-	StateMachine    epaxos.StateMachine
-	CheckpointCycle uint64
-	BatchInterval   time.Duration
-	TimeoutInterval time.Duration
-	ExecuteInterval time.Duration
-	Addrs           []string
-	Transporter     epaxos.Transporter
-	EnableBatching  bool
+	ReplicaId        uint8
+	Size             uint8
+	StateMachine     epaxos.StateMachine
+	CheckpointCycle  uint64
+	BatchInterval    time.Duration
+	TimeoutInterval  time.Duration
+	ExecuteInterval  time.Duration
+	Addrs            []string
+	Transporter      epaxos.Transporter
+	EnableBatching   bool
+	EnablePersistent bool
+	Restore          bool
+	PersistentPath   string
 }
 
 type proposeRequest struct {
@@ -165,6 +183,7 @@ func New(param *Param) (*Replica, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	r := &Replica{
 		Id:              param.ReplicaId,
 		Size:            param.Size,
@@ -187,21 +206,45 @@ func New(param *Param) (*Replica, error) {
 		timeoutTicker: time.NewTicker(param.TimeoutInterval),
 		proposeTicker: time.NewTicker(param.BatchInterval),
 
-		executeTrigger: make(chan bool),
-		stop:           make(chan struct{}),
-		enableBatching: param.EnableBatching,
+		executeTrigger:   make(chan bool),
+		stop:             make(chan struct{}),
+		enableBatching:   param.EnableBatching,
+		enablePersistent: param.EnablePersistent,
 	}
-	r.Transporter.RegisterChannel(r.MessageChan)
 
-	if !r.enableBatching {
-		// stop ticker
-		r.proposeTicker.Stop()
+	var path string
+	if param.PersistentPath == "" {
+		path = fmt.Sprintf("%s-%d", "/dev/shm/test", r.Id)
+	} else {
+		path = param.PersistentPath
+	}
+
+	r.store, err = persistent.NewLevelDB(path, param.Restore)
+	if err != nil {
+		glog.Errorln("replica.New: failed to make new storage")
+		return nil, err
 	}
 
 	for i := uint8(0); i < param.Size; i++ {
 		r.InstanceMatrix[i] = make([]*Instance, defaultInstancesLength)
 		r.MaxInstanceNum[i] = conflictNotFound
 		r.ExecutedUpTo[i] = conflictNotFound
+	}
+
+	// restore replica and instances
+	if param.Restore {
+		err := r.RecoverFromPersistent()
+		if err != nil {
+			glog.Errorln("Recover from persistent failed!")
+			return nil, err
+		}
+	}
+
+	r.Transporter.RegisterChannel(r.MessageChan)
+
+	if !r.enableBatching {
+		// stop ticker
+		r.proposeTicker.Stop()
 	}
 
 	return r, nil
@@ -226,6 +269,7 @@ func (r *Replica) Stop() {
 	close(r.stop)
 	r.stopTickers()
 	r.Transporter.Stop()
+	r.store.Close()
 }
 
 func (r *Replica) timeoutLoop() {
@@ -343,6 +387,7 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 	if r.IsCheckpoint(r.ProposeNum) {
 		r.ProposeNum++
 	}
+	r.StoreReplica()
 
 	// TODO: we could use another channel
 	// and with synchronization to improve throughput
@@ -416,6 +461,10 @@ func (r *Replica) dispatch(msg message.Message) {
 	} else {
 		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v, ballot = [%v]\n",
 			r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
+	}
+
+	if r.enablePersistent {
+		r.StoreSingleInstance(i)
 	}
 
 	switch action {
@@ -544,6 +593,9 @@ func (r *Replica) scanConflicts(instances []*Instance, cmds message.Commands, st
 }
 
 func (r *Replica) updateMaxInstanceNum(rowId uint8, instanceId uint64) bool {
+	if r.enablePersistent {
+		defer r.StoreReplica()
+	}
 	if r.MaxInstanceNum[rowId] < instanceId {
 		r.MaxInstanceNum[rowId] = instanceId
 		return true
@@ -631,6 +683,9 @@ func (r *Replica) executeList() error {
 		// TODO: transaction one SCC
 		for _, instance := range sccNodes {
 			instance.SetExecuted()
+		}
+		if r.enablePersistent {
+			r.StoreInstances(sccNodes...)
 		}
 	}
 	return nil
@@ -750,4 +805,136 @@ func printDependencies(msg message.Message) {
 	case *message.Commit:
 		v2Log.Infof("dependencies: %v\n", m.Deps)
 	}
+}
+
+// store and restore the instance
+func (r *Replica) StoreSingleInstance(inst *Instance) error {
+	var buffer bytes.Buffer
+
+	p := inst.Pack()
+	key := fmt.Sprintf("%v-%v-%v", r.Id, p.RowId, p.Id)
+	enc := gob.NewEncoder(&buffer)
+	err := enc.Encode(p)
+	if err != nil {
+		return err
+	}
+	return r.store.Put(key, buffer.Bytes())
+}
+
+func (r *Replica) RestoreSingleInstance(rowId uint8, instanceId uint64) (*Instance, error) {
+	inst := NewInstance(r, rowId, instanceId)
+	var p PackedInstance
+
+	key := fmt.Sprintf("%v-%v-%v", r.Id, inst.rowId, inst.id)
+	b, err := r.store.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	buffer := bytes.NewBuffer(b)
+	dec := gob.NewDecoder(buffer)
+	err = dec.Decode(&p)
+	if err != nil {
+		return nil, err
+	}
+	inst.Unpack(&p)
+	return inst, nil
+}
+
+func (r *Replica) StoreInstances(insts ...*Instance) error {
+	kvs := make([]*epaxos.KVpair, len(insts))
+	for i := range insts {
+		var buffer bytes.Buffer
+		p := insts[i].Pack()
+		key := fmt.Sprintf("%v-%v-%v", r.Id, insts[i].rowId, insts[i].id)
+		enc := gob.NewEncoder(&buffer)
+		err := enc.Encode(p)
+		if err != nil {
+			return err
+		}
+		kvs[i] = &epaxos.KVpair{
+			Key:   key,
+			Value: buffer.Bytes(),
+		}
+	}
+	return r.store.BatchPut(kvs)
+}
+
+// pack and unpack the replica
+func (r *Replica) Pack() *PackedReplica {
+	p := &PackedReplica{
+		Id:             r.Id,
+		Size:           r.Size,
+		MaxInstanceNum: make([]uint64, r.Size),
+		ExecutedUpTo:   make([]uint64, r.Size),
+		ProposeNum:     r.ProposeNum,
+	}
+	for i := uint8(0); i < r.Size; i++ {
+		p.MaxInstanceNum[i] = r.MaxInstanceNum[i]
+		p.ExecutedUpTo[i] = r.ExecutedUpTo[i]
+	}
+	return p
+}
+
+func (r *Replica) Unpack(p *PackedReplica) {
+	r.Id = p.Id
+	r.Size = p.Size
+	for i := uint8(0); i < r.Size; i++ {
+		r.MaxInstanceNum[i] = p.MaxInstanceNum[i]
+		r.ExecutedUpTo[i] = p.ExecutedUpTo[i]
+	}
+	r.ProposeNum = p.ProposeNum
+}
+
+// store and restore the replica
+func (r *Replica) StoreReplica() error {
+	var buffer bytes.Buffer
+
+	p := r.Pack()
+	key := fmt.Sprintf("%v-replica", r.Id)
+	enc := gob.NewEncoder(&buffer)
+	err := enc.Encode(p)
+	if err != nil {
+		return err
+	}
+	return r.store.Put(key, buffer.Bytes())
+}
+
+func (r *Replica) RestoreReplica() error {
+	var p PackedReplica
+
+	key := fmt.Sprintf("%v-replica", r.Id)
+	b, err := r.store.Get(key)
+	if err != nil {
+		return err
+	}
+	buffer := bytes.NewBuffer(b)
+	dec := gob.NewDecoder(buffer)
+	err = dec.Decode(&p)
+	r.Unpack(&p)
+
+	return nil
+}
+
+// recover from persistent storage
+func (r *Replica) RecoverFromPersistent() error {
+	err := r.RestoreReplica()
+	if err != nil {
+		glog.Errorln("replica.New: failed to restore replica info")
+		return err
+	}
+
+	for i := uint8(0); i < r.Size; i++ {
+		for j := uint64(0); j <= r.MaxInstanceNum[i]; j++ {
+			if r.IsCheckpoint(j) {
+				continue
+			}
+			inst, err := r.RestoreSingleInstance(i, j)
+			if err != nil && err != epaxos.ErrorNotFound {
+				glog.Errorf("replica.New: failed to restore instance info, for [%v][%v]\n", i, j)
+				return err
+			}
+			r.InstanceMatrix[i][j] = inst
+		}
+	}
+	return nil
 }

@@ -62,6 +62,34 @@ func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 	return nodes
 }
 
+func livetestlibSetupEasyTimeoutCluster(clusterSize int) []*replica.Replica {
+	nodes := make([]*replica.Replica, clusterSize)
+
+	for i := range nodes {
+		param := &replica.Param{
+			ExecuteInterval: time.Second * 50, // disable execution
+			TimeoutInterval: time.Millisecond * 20, // disable timeout
+			ReplicaId:       uint8(i),
+			Size:            uint8(clusterSize),
+			StateMachine:    new(test.DummySM),
+			Transporter:     transporter.NewDummyTR(uint8(i), clusterSize),
+		}
+		nodes[i], _ = replica.New(param)
+	}
+
+	chs := make([]chan message.Message, clusterSize)
+	for i := range nodes {
+		chs[i] = nodes[i].MessageChan
+	}
+
+	for i := range nodes {
+		nodes[i].Transporter.(*transporter.DummyTransporter).RegisterChannels(chs)
+		nodes[i].Start()
+	}
+
+	return nodes
+}
+
 func livetestlibStopCluster(nodes []*replica.Replica) {
 	for _, r := range nodes {
 		r.Stop()
@@ -269,6 +297,57 @@ func Test3ProposerConflict(t *testing.T) {
 	}
 	fmt.Println("Wait 5 seconds for completion")
 	time.Sleep(5 * time.Second)
+
+	assert.True(t, livetestlibLogConsistent(t, nodes...))
+
+	for i := 1; i < maxInstance; i++ {
+		if nodes[0].IsCheckpoint(uint64(i)) {
+			continue
+		}
+
+		pos := uint64(i)
+		assert.True(t, liveTestlibVerifyDependency(nodes[0], pos))
+	}
+}
+
+// Test Scenario: Non-conflict commands, 3 proposers
+// Expect: All replicas have same correct logs(cmds, deps) eventually
+func Test3Replica3ProposerNoConflictTimeout(t *testing.T) {
+	N := 3
+	maxInstance := 1024 * 4
+	nodes := livetestlibSetupEasyTimeoutCluster(N)
+	defer livetestlibStopCluster(nodes)
+
+	for i := 0; i < maxInstance; i++ {
+		for j := range nodes {
+			index := i*N + j
+			cmds := livetestlibExampleCommands(index)
+			go nodes[j].Propose(cmds...) // batching disabled
+		}
+	}
+	fmt.Println("Wait 15 Seconds for completion")
+	time.Sleep(15 * time.Second)
+
+	assert.True(t, livetestlibLogConsistent(t, nodes...))
+}
+
+func Test3ProposerConflictTimeout(t *testing.T) {
+	N := 3
+	maxInstance := 2048
+	nodes := livetestlibSetupEasyTimeoutCluster(N)
+	defer livetestlibStopCluster(nodes)
+
+	// node 0 must conflict with 1, maybe with 2
+	// node 1 must conflict with 0, maybe with 2
+	// node 2 must conflict with 0, maybe with 1
+	for i := 1; i < maxInstance; i++ {
+		for j := 0; j < N; j++ {
+			cmds := livetestlibExampleCommands(i)
+			go nodes[j].Propose(cmds...) //batching disabled
+		}
+	}
+	fmt.Println("Wait 15 seconds for completion")
+	time.Sleep(15 * time.Second)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 

@@ -717,3 +717,173 @@ func TestProposeIdWithBatch(t *testing.T) {
 		assert.Equal(t, <-resultIDs[i], expectIDs[i])
 	}
 }
+
+// test persistent store
+func TestStoreSingleInstance(t *testing.T) {
+	param := &Param{
+		ReplicaId:      0,
+		Size:           3,
+		StateMachine:   new(test.DummySM),
+		EnableBatching: true,
+		BatchInterval:  time.Millisecond * 50,
+		Transporter:    transporter.NewDummyTR(0, 5),
+	}
+	r, err := New(param)
+	assert.NoError(t, err)
+	defer func() {
+		r.store.Close()
+		r.store.Drop()
+	}()
+
+	inst := commonTestlibExampleAcceptedInstance()
+	assert.NoError(t, r.StoreSingleInstance(inst))
+}
+
+func TestStoreRestoreSingleInstance(t *testing.T) {
+	param := &Param{
+		ReplicaId:      0,
+		Size:           3,
+		StateMachine:   new(test.DummySM),
+		EnableBatching: true,
+		BatchInterval:  time.Millisecond * 50,
+		Transporter:    transporter.NewDummyTR(0, 5),
+	}
+	r, err := New(param)
+	assert.NoError(t, err)
+	defer func() {
+		r.store.Close()
+		r.store.Drop()
+	}()
+
+	inst := commonTestlibExampleAcceptedInstance()
+	assert.NoError(t, r.StoreSingleInstance(inst))
+
+	storedInst, err := r.RestoreSingleInstance(inst.rowId, inst.id)
+	assert.NoError(t, err)
+	assert.Equal(t, storedInst.cmds, inst.cmds)
+	assert.Equal(t, storedInst.deps, inst.deps)
+	assert.Equal(t, storedInst.status, inst.status)
+	assert.Equal(t, storedInst.ballot, inst.ballot)
+	assert.Equal(t, storedInst.executed, inst.executed)
+}
+
+func TestStoreRestoreSinglePreparingInstance(t *testing.T) {
+	param := &Param{
+		ReplicaId:      0,
+		Size:           3,
+		StateMachine:   new(test.DummySM),
+		EnableBatching: true,
+		BatchInterval:  time.Millisecond * 50,
+		Transporter:    transporter.NewDummyTR(0, 5),
+	}
+	r, err := New(param)
+	assert.NoError(t, err)
+	defer func() {
+		r.store.Close()
+		r.store.Drop()
+	}()
+
+	inst := commonTestlibExamplePreparingInstance()
+	assert.NoError(t, r.StoreSingleInstance(inst))
+
+	storedInst, err := r.RestoreSingleInstance(inst.rowId, inst.id)
+	assert.NoError(t, err)
+	assert.Equal(t, storedInst.cmds, inst.cmds)
+	assert.Equal(t, storedInst.deps, inst.deps)
+	assert.Equal(t, storedInst.status, inst.status)
+	assert.Equal(t, storedInst.ballot, inst.ballot)
+	assert.Equal(t, storedInst.recoveryInfo.ballot, inst.recoveryInfo.ballot)
+	assert.Equal(t, storedInst.recoveryInfo.cmds, inst.recoveryInfo.cmds)
+	assert.Equal(t, storedInst.recoveryInfo.deps, inst.recoveryInfo.deps)
+	assert.Equal(t, storedInst.recoveryInfo.status, inst.recoveryInfo.status)
+	assert.Equal(t, storedInst.recoveryInfo.formerStatus, inst.recoveryInfo.formerStatus)
+	assert.Equal(t, storedInst.executed, inst.executed)
+}
+
+func TestStoreRestoreMultipleInstances(t *testing.T) {
+	param := &Param{
+		ReplicaId:      0,
+		Size:           3,
+		StateMachine:   new(test.DummySM),
+		EnableBatching: true,
+		BatchInterval:  time.Millisecond * 50,
+		Transporter:    transporter.NewDummyTR(0, 5),
+	}
+	r, err := New(param)
+	assert.NoError(t, err)
+	defer func() {
+		r.store.Close()
+		r.store.Drop()
+	}()
+
+	instGroup := make([]*Instance, 5)
+	instGroup[0] = commonTestlibExampleNilStatusInstance()
+	instGroup[0].id = 1
+	instGroup[1] = commonTestlibExamplePreAcceptedInstance()
+	instGroup[1].id = 2
+	instGroup[2] = commonTestlibExampleAcceptedInstance()
+	instGroup[2].id = 3
+	instGroup[3] = commonTestlibExampleCommittedInstance()
+	instGroup[3].id = 4
+	instGroup[4] = commonTestlibExamplePreparingInstance()
+	instGroup[4].id = 5
+
+	assert.NoError(t, r.StoreInstances(instGroup...))
+
+	for _, inst := range instGroup {
+		storedInst, err := r.RestoreSingleInstance(inst.rowId, inst.id)
+		assert.NoError(t, err)
+		assert.Equal(t, storedInst.cmds, inst.cmds)
+		assert.Equal(t, storedInst.deps, inst.deps)
+		assert.Equal(t, storedInst.status, inst.status)
+		assert.Equal(t, storedInst.ballot, inst.ballot)
+		if inst.isAtStatus(preparing) {
+			assert.Equal(t, storedInst.recoveryInfo.ballot, inst.recoveryInfo.ballot)
+			assert.Equal(t, storedInst.recoveryInfo.cmds, inst.recoveryInfo.cmds)
+			assert.Equal(t, storedInst.recoveryInfo.deps, inst.recoveryInfo.deps)
+			assert.Equal(t, storedInst.recoveryInfo.status, inst.recoveryInfo.status)
+			assert.Equal(t, storedInst.recoveryInfo.formerStatus, inst.recoveryInfo.formerStatus)
+			assert.Equal(t, storedInst.executed, inst.executed)
+		}
+	}
+}
+
+func TestStoreAndRestoreReplica(t *testing.T) {
+	param := &Param{
+		ReplicaId:      0,
+		Size:           3,
+		StateMachine:   new(test.DummySM),
+		EnableBatching: true,
+		BatchInterval:  time.Millisecond * 50,
+		Transporter:    transporter.NewDummyTR(0, 5),
+	}
+	r, err := New(param)
+	assert.NoError(t, err)
+
+	r.MaxInstanceNum[0] = 42
+	r.MaxInstanceNum[1] = 88
+	r.MaxInstanceNum[2] = 102
+
+	r.ExecutedUpTo[0] = 42
+	r.ExecutedUpTo[1] = 88
+	r.ExecutedUpTo[2] = 33
+
+	r.ProposeNum = 10
+
+	// store to disk
+	assert.NoError(t, r.StoreReplica())
+
+	// restore from disk
+	param.Restore = true
+	rr, err := New(param)
+	assert.NoError(t, err)
+
+	assert.Equal(t, r.Id, rr.Id)
+	assert.Equal(t, r.Size, rr.Size)
+	assert.Equal(t, r.MaxInstanceNum, rr.MaxInstanceNum)
+	assert.Equal(t, r.ExecutedUpTo, rr.ExecutedUpTo)
+	assert.Equal(t, r.ProposeNum, rr.ProposeNum)
+
+	r.store.Drop()
+	rr.store.Drop()
+}

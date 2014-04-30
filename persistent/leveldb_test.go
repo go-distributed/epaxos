@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewCloseAndDrop(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test")
+	l, err := NewLevelDB("/tmp/test", false)
 	defer func() {
 		assert.NoError(t, l.Close())
 		assert.NoError(t, l.Drop())
@@ -22,7 +22,7 @@ func TestNewCloseAndDrop(t *testing.T) {
 }
 
 func TestPutAndGet(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test")
+	l, err := NewLevelDB("/tmp/test", false)
 	assert.NoError(t, err)
 
 	defer func() {
@@ -35,10 +35,13 @@ func TestPutAndGet(t *testing.T) {
 	v, err := l.Get("hello")
 	assert.NoError(t, err)
 	assert.Equal(t, v, []byte("world"))
+
+	v, err = l.Get("world")
+	assert.Equal(t, err, epaxos.ErrorNotFound)
 }
 
 func TestBatchPut(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test")
+	l, err := NewLevelDB("/tmp/test", false)
 	assert.NoError(t, err)
 
 	defer func() {
@@ -46,16 +49,17 @@ func TestBatchPut(t *testing.T) {
 		assert.NoError(t, l.Drop())
 	}()
 
-	kv1 := &epaxos.KVpair{
+	kvs := make([]*epaxos.KVpair, 2)
+	kvs[0] = &epaxos.KVpair{
 		Key:   "hello",
 		Value: []byte("world"),
 	}
-	kv2 := &epaxos.KVpair{
+	kvs[1] = &epaxos.KVpair{
 		Key:   "epaxos",
 		Value: []byte("rocks"),
 	}
 
-	assert.NoError(t, l.BatchPut(kv1, kv2))
+	assert.NoError(t, l.BatchPut(kvs))
 	v, err := l.Get("hello")
 	assert.NoError(t, err)
 	assert.Equal(t, v, []byte("world"))

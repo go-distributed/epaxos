@@ -16,7 +16,7 @@ import (
 var _ = fmt.Printf
 
 const (
-	chars = "ABCDEFG"
+	chars           = "ABCDEFG"
 	prepareInterval = 5 // 5 seconds
 )
 
@@ -36,8 +36,11 @@ func (v *Voter) HaveConflicts(c1 []message.Command, c2 []message.Command) bool {
 
 func main() {
 	var id int
+	var restore bool
 
 	flag.IntVar(&id, "id", -1, "id of the server")
+	flag.BoolVar(&restore, "restore", false, "if recover")
+
 	flag.Parse()
 
 	if id < 0 {
@@ -56,11 +59,14 @@ func main() {
 		panic(err)
 	}
 	param := &replica.Param{
-		Addrs:        addrs,
-		ReplicaId:    uint8(id),
-		Size:         uint8(len(addrs)),
-		StateMachine: new(Voter),
-		Transporter:  tr,
+		Addrs:            addrs,
+		ReplicaId:        uint8(id),
+		Size:             uint8(len(addrs)),
+		StateMachine:     new(Voter),
+		Transporter:      tr,
+		EnablePersistent: true,
+		Restore:          restore,
+		TimeoutInterval:  time.Second,
 	}
 
 	fmt.Println("====== Spawn new replica ======")
@@ -79,9 +85,11 @@ func main() {
 	fmt.Println("====== start ======")
 
 	rand.Seed(time.Now().UTC().UnixNano())
+	counter := 0
 	for {
 		time.Sleep(time.Millisecond * 500)
-		c := "From: " + strconv.Itoa(id) + ", Command: " + string(chars[rand.Intn(len(chars))]) + ", " + time.Now().String()
+		c := "From: " + strconv.Itoa(id) + ", Command: " + strconv.Itoa(counter) + ", " + time.Now().String()
+		counter++
 
 		cmds := make([]message.Command, 0)
 		cmds = append(cmds, message.Command(c))

@@ -15,10 +15,17 @@ type LevelDB struct {
 	wsync *db.WriteOptions
 }
 
-func NewLevelDB(path string) (*LevelDB, error) {
+func NewLevelDB(path string, restore bool) (*LevelDB, error) {
 	fpath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
+	}
+
+	if !restore {
+		err = os.RemoveAll(fpath)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	ldb, err := leveldb.Open(fpath, nil) // TODO: tune the option
@@ -39,14 +46,18 @@ func (l *LevelDB) Put(key string, value []byte) error {
 }
 
 func (l *LevelDB) Get(key string) ([]byte, error) {
-	return l.ldb.Get([]byte(key), nil)
+	b, err := l.ldb.Get([]byte(key), nil)
+	if err == db.ErrNotFound {
+		return b, epaxos.ErrorNotFound
+	}
+	return b, err
 }
 
 func (l *LevelDB) Delete(key string) error {
 	return l.ldb.Delete([]byte(key), l.wsync)
 }
 
-func (l *LevelDB) BatchPut(kvs ...*epaxos.KVpair) error {
+func (l *LevelDB) BatchPut(kvs []*epaxos.KVpair) error {
 	b := new(leveldb.Batch)
 	for i := range kvs {
 		b.Set([]byte(kvs[i].Key), kvs[i].Value)
