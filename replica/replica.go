@@ -130,6 +130,7 @@ type Param struct {
 	EnableBatching   bool
 	EnablePersistent bool
 	Restore          bool
+	PersistentPath   string
 }
 
 type proposeRequest struct {
@@ -211,7 +212,13 @@ func New(param *Param) (*Replica, error) {
 		enablePersistent: param.EnablePersistent,
 	}
 
-	path := fmt.Sprintf("%s-%d", "/tmp/test", r.Id)
+	var path string
+	if param.PersistentPath == "" {
+		path = fmt.Sprintf("%s-%d", "/dev/shm/test", r.Id)
+	} else {
+		path = param.PersistentPath
+	}
+
 	r.store, err = persistent.NewLevelDB(path, param.Restore)
 	if err != nil {
 		glog.Errorln("replica.New: failed to make new storage")
@@ -380,6 +387,7 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 	if r.IsCheckpoint(r.ProposeNum) {
 		r.ProposeNum++
 	}
+	r.StoreReplica()
 
 	// TODO: we could use another channel
 	// and with synchronization to improve throughput
@@ -874,6 +882,7 @@ func (r *Replica) Unpack(p *PackedReplica) {
 		r.MaxInstanceNum[i] = p.MaxInstanceNum[i]
 		r.ExecutedUpTo[i] = p.ExecutedUpTo[i]
 	}
+	r.ProposeNum = p.ProposeNum
 }
 
 // store and restore the replica

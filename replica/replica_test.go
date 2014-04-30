@@ -882,6 +882,7 @@ func TestStoreAndRestoreReplica(t *testing.T) {
 	assert.Equal(t, r.Size, rr.Size)
 	assert.Equal(t, r.MaxInstanceNum, rr.MaxInstanceNum)
 	assert.Equal(t, r.ExecutedUpTo, rr.ExecutedUpTo)
+	assert.Equal(t, r.ProposeNum, rr.ProposeNum)
 
 	r.store.Drop()
 	rr.store.Drop()
