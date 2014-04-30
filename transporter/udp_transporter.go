@@ -1,6 +1,7 @@
 package transporter
 
 import (
+	"bytes"
 	"encoding/gob"
 	"math/rand"
 	"net"
@@ -8,6 +9,8 @@ import (
 	"github.com/go-distributed/epaxos/message"
 	"github.com/golang/glog"
 )
+
+const defaultUDPSize = 8192
 
 type UDPTransporter struct {
 	Addrs      []*net.UDPAddr
@@ -17,8 +20,11 @@ type UDPTransporter struct {
 	Conns      []*net.UDPConn
 	ch         chan message.Message
 	stop       chan struct{}
-	encs       []*gob.Encoder
-	dec        *gob.Decoder
+
+	encBuffer *bytes.Buffer //TODO: race condition
+	decBuffer *bytes.Buffer
+	enc       *gob.Encoder
+	dec       *gob.Decoder
 }
 
 func NewUDPTransporter(addrStrs []string,
@@ -38,7 +44,6 @@ func NewUDPTransporter(addrStrs []string,
 	gob.Register(&message.Prepare{})
 	gob.Register(&message.PrepareReply{})
 
-	var dec *gob.Decoder
 	for i := range addrs {
 		addrs[i], err = net.ResolveUDPAddr("udp", addrStrs[i])
 		if err != nil {
@@ -51,7 +56,6 @@ func NewUDPTransporter(addrStrs []string,
 			if err != nil {
 				return nil, err
 			}
-			dec = gob.NewDecoder(conns[i])
 		}
 	}
 
@@ -62,17 +66,25 @@ func NewUDPTransporter(addrStrs []string,
 		All:        uint8(size),
 		Conns:      conns,
 		stop:       make(chan struct{}),
-		encs:       make([]*gob.Encoder, size),
-		dec:        dec,
+		encBuffer:  new(bytes.Buffer),
+		decBuffer:  new(bytes.Buffer),
 	}
+	nt.enc = gob.NewEncoder(nt.encBuffer)
+	nt.dec = gob.NewDecoder(nt.decBuffer)
+
 	return nt, nil
 }
 
 func (nt *UDPTransporter) Send(to uint8, msg message.Message) {
 	go func() {
-		err := nt.encs[to].Encode(&msg)
+		buf := new(bytes.Buffer)
+		enc := gob.NewEncoder(buf)
+		if err := enc.Encode(&msg); err != nil {
+			glog.Warning("Encoding error ", err)
+		}
+		_, err := nt.Conns[to].Write(buf.Bytes())
 		if err != nil {
-			glog.Warning("Encoding error", err)
+			glog.Warning("UDP write error ", err)
 		}
 	}()
 }
@@ -116,11 +128,12 @@ func (nt *UDPTransporter) Start() error {
 		if err != nil {
 			return err
 		}
-		nt.encs[i] = gob.NewEncoder(nt.Conns[i])
 	}
 
 	// start receive loop
 	var msg message.Message
+	b := make([]byte, defaultUDPSize)
+	buf := new(bytes.Buffer)
 	go func() {
 		for {
 			select {
@@ -130,9 +143,18 @@ func (nt *UDPTransporter) Start() error {
 			}
 
 			// receive message
-			err := nt.dec.Decode(&msg)
+			n, _, err := nt.Conns[nt.Self].ReadFrom(b)
 			if err != nil {
-				glog.Warning("Decoding error", err)
+				glog.Warning("UDP read error ", err)
+				continue
+			}
+
+			buf.Reset()
+			buf.Write(b[:n])
+			dec := gob.NewDecoder(buf)
+			err = dec.Decode(&msg)
+			if err != nil {
+				glog.Warning("Decoding error ", err)
 			}
 			nt.ch <- msg
 		}
