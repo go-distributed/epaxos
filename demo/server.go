@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"time"
 
@@ -17,16 +18,22 @@ var _ = fmt.Printf
 
 const (
 	chars           = "ABCDEFG"
-	prepareInterval = 5 // 5 seconds
+	prepareInterval = 1 // 1 seconds
 )
 
-type Voter struct {
-}
+type Voter struct{}
 
 // NOTE: This is not idempotent.
 //      Same command might be executed for multiple times
+//      but the exection is slow now, so it is unlikely to happen
 func (v *Voter) Execute(c []message.Command) ([]interface{}, error) {
-	fmt.Println(string(c[0]))
+	if c == nil || len(c) == 0 {
+		fmt.Fprintln(os.Stderr, "No op")
+	} else {
+		for i := range c {
+			fmt.Fprintln(os.Stderr, string(c[i]))
+		}
+	}
 	return nil, nil
 }
 
@@ -67,6 +74,7 @@ func main() {
 		EnablePersistent: true,
 		Restore:          restore,
 		TimeoutInterval:  time.Second,
+		//ExecuteInterval:  time.Second,
 	}
 
 	fmt.Println("====== Spawn new replica ======")
@@ -85,10 +93,10 @@ func main() {
 	fmt.Println("====== start ======")
 
 	rand.Seed(time.Now().UTC().UnixNano())
-	counter := 0
+	counter := 1
 	for {
 		time.Sleep(time.Millisecond * 500)
-		c := "From: " + strconv.Itoa(id) + ", Command: " + strconv.Itoa(counter) + ", " + time.Now().String()
+		c := "From: " + strconv.Itoa(id) + ", Command: " + strconv.Itoa(id) + ":" + strconv.Itoa(counter) + ", " + time.Now().String()
 		counter++
 
 		cmds := make([]message.Command, 0)

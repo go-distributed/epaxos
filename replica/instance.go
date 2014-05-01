@@ -1068,7 +1068,8 @@ func (i *Instance) touch() {
 }
 
 func (i *Instance) inactiveDuaration() time.Duration {
-	return time.Now().Sub(i.lastTouched)
+	p := time.Now().Sub(i.lastTouched)
+	return p
 }
 
 // check if this instance is timeout

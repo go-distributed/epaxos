@@ -67,7 +67,7 @@ func livetestlibSetupEasyTimeoutCluster(clusterSize int) []*replica.Replica {
 
 	for i := range nodes {
 		param := &replica.Param{
-			ExecuteInterval: time.Second * 50, // disable execution
+			ExecuteInterval: time.Second * 50,      // disable execution
 			TimeoutInterval: time.Millisecond * 20, // disable timeout
 			ReplicaId:       uint8(i),
 			Size:            uint8(clusterSize),
@@ -214,7 +214,7 @@ func liveTestlibVerifyDependency(r *replica.Replica, pos uint64) bool {
 // Test Scenario: Non-conflict commands, 1 proposer
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica1ProposerNoConflict(t *testing.T) {
-	maxInstance := 1024 * 4
+	maxInstance := 1024 * 2
 	allCmds := make([]message.Commands, maxInstance)
 
 	nodes := livetestlibSetupCluster(3)
@@ -236,7 +236,7 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica3ProposerNoConflict(t *testing.T) {
 	N := 3
-	maxInstance := 1024 * 4
+	maxInstance := 1024 * 2
 	nodes := livetestlibSetupCluster(N)
 	defer livetestlibStopCluster(nodes)
 
