@@ -1,4 +1,4 @@
-package data
+package message
 
 import (
 	"bytes"
@@ -22,4 +22,10 @@ func (c Commands) Clone() Commands {
 		copy(cmds[i], c[i])
 	}
 	return cmds
+}
+
+func (c Command) Clone() Command {
+	cmd := make(Command, len(c))
+	copy(cmd, c)
+	return cmd
 }

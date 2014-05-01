@@ -7,28 +7,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/message"
 	"github.com/go-distributed/epaxos/replica"
 	"github.com/go-distributed/epaxos/test"
-
+	"github.com/go-distributed/epaxos/transporter"
 	"github.com/stretchr/testify/assert"
 )
 
 var _ = fmt.Printf
 var _ = assert.Equal
 
-func livetestlibExampleCommands(i int) data.Commands {
-	return data.Commands{
-		data.Command(strconv.Itoa(i)),
+func livetestlibExampleCommands(i int) message.Commands {
+	return message.Commands{
+		message.Command(strconv.Itoa(i)),
 	}
 }
 
-func livetestlibConflictedCommands(total int) (res []data.Commands) {
-	res = make([]data.Commands, total)
-	for i := 0; i < total; i++ {
-		res[i] = data.Commands{
-			data.Command("c"),
-			data.Command(strconv.Itoa(i)),
+func livetestlibConflictedCommands(total int) (res []message.Commands) {
+	res = make([]message.Commands, total)
+	for i := range res {
+		res[i] = message.Commands{
+			message.Command("c"),
+			message.Command(strconv.Itoa(i)),
 		}
 	}
 	return
@@ -37,26 +37,63 @@ func livetestlibConflictedCommands(total int) (res []data.Commands) {
 func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 	nodes := make([]*replica.Replica, clusterSize)
 
-	param := &replica.Param{
-		Size:         uint8(clusterSize),
-		StateMachine: new(test.DummySM),
-	}
-	for i := 0; i < clusterSize; i++ {
-		param.ReplicaId = uint8(i)
-		nodes[i] = replica.New(param)
+	for i := range nodes {
+		param := &replica.Param{
+			ExecuteInterval: time.Second * 50, // disable execution
+			TimeoutInterval: time.Second * 50, // disable timeout
+			ReplicaId:       uint8(i),
+			Size:            uint8(clusterSize),
+			StateMachine:    new(test.DummySM),
+			Transporter:     transporter.NewDummyTR(uint8(i), clusterSize),
+		}
+		nodes[i], _ = replica.New(param)
 	}
 
-	for i := 0; i < clusterSize; i++ {
-		nodes[i].Transporter = &DummyTransporter{
-			Nodes:      nodes,
-			Self:       uint8(i),
-			FastQuorum: uint8(clusterSize) - 2,
-			All:        uint8(clusterSize),
-		}
+	chs := make([]chan message.Message, clusterSize)
+	for i := range nodes {
+		chs[i] = nodes[i].MessageChan
+	}
+
+	for i := range nodes {
+		nodes[i].Transporter.(*transporter.DummyTransporter).RegisterChannels(chs)
 		nodes[i].Start()
 	}
 
 	return nodes
+}
+
+func livetestlibSetupEasyTimeoutCluster(clusterSize int) []*replica.Replica {
+	nodes := make([]*replica.Replica, clusterSize)
+
+	for i := range nodes {
+		param := &replica.Param{
+			ExecuteInterval: time.Second * 50,      // disable execution
+			TimeoutInterval: time.Millisecond * 20, // disable timeout
+			ReplicaId:       uint8(i),
+			Size:            uint8(clusterSize),
+			StateMachine:    new(test.DummySM),
+			Transporter:     transporter.NewDummyTR(uint8(i), clusterSize),
+		}
+		nodes[i], _ = replica.New(param)
+	}
+
+	chs := make([]chan message.Message, clusterSize)
+	for i := range nodes {
+		chs[i] = nodes[i].MessageChan
+	}
+
+	for i := range nodes {
+		nodes[i].Transporter.(*transporter.DummyTransporter).RegisterChannels(chs)
+		nodes[i].Start()
+	}
+
+	return nodes
+}
+
+func livetestlibStopCluster(nodes []*replica.Replica) {
+	for _, r := range nodes {
+		r.Stop()
+	}
 }
 
 // This function tests the equality of two replicas'log
@@ -75,18 +112,42 @@ func livetestlibLogCmpForTwo(t *testing.T, a, b *replica.Replica, row int) bool 
 		if a.IsCheckpoint(uint64(i)) {
 			continue
 		}
-		if !reflect.DeepEqual(
-			a.InstanceMatrix[row][i].Commands(),
-			b.InstanceMatrix[row][i].Commands()) {
+
+		if a.InstanceMatrix[row][i] == nil {
+			t.Logf("WARNING: Instance doesn't exist for replica[%d]:Instance[%d][%d]",
+				a.Id, row, i)
+		}
+
+		if b.InstanceMatrix[row][i] == nil {
+			t.Logf("WARNING: Instance doesn't exist for replica[%d]:Instance[%d][%d]",
+				b.Id, row, i)
+		}
+
+		if a.InstanceMatrix[row][i].StatusString() != "Committed" {
+			t.Logf("WARNING: Instance is not committed for replica[%d]:Instance[%d][%d]",
+				a.Id, row, i)
+		}
+
+		if b.InstanceMatrix[row][i].StatusString() != "Committed" {
+			t.Logf("WARNING: Instance is not committed for replica[%d]:Instance[%d][%d]",
+				b.Id, row, i)
+		}
+
+		ca := a.InstanceMatrix[row][i].Commands()
+		cb := b.InstanceMatrix[row][i].Commands()
+		if !reflect.DeepEqual(ca, cb) {
 			t.Logf("Cmds are not equal for replica[%d]:Instance[%d][%d] and replica[%d]:Instance[%d][%d]\n",
 				a.Id, row, i, b.Id, row, i)
+			t.Logf("%v, %v\n", ca, cb)
 			return false
 		}
-		if !reflect.DeepEqual(
-			a.InstanceMatrix[row][i].Dependencies(),
-			b.InstanceMatrix[row][i].Dependencies()) {
+
+		da := a.InstanceMatrix[row][i].Dependencies()
+		db := b.InstanceMatrix[row][i].Dependencies()
+		if !reflect.DeepEqual(da, db) {
 			t.Logf("Deps are not equal for replica[%d]:Instance[%d][%d] and replica[%d]:Instance[%d][%d]\n",
 				a.Id, row, i, b.Id, row, i)
+			t.Logf("%v, %v\n", da, db)
 			return false
 		}
 	}
@@ -98,7 +159,6 @@ func livetestlibLogCmpForTwo(t *testing.T, a, b *replica.Replica, row int) bool 
 // are identical.
 func livetestlibLogConsistent(t *testing.T, replicas ...*replica.Replica) bool {
 	size := int(replicas[0].Size)
-
 	for i := range replicas {
 		next := (i + 1) % size
 		for j := 0; j < size; j++ {
@@ -110,20 +170,63 @@ func livetestlibLogConsistent(t *testing.T, replicas ...*replica.Replica) bool {
 	return true
 }
 
+// This func tests if the log has correctly record the conflicts
+// return true if dep[row] == instanceId or dep[row] is a checkpoint
+// r is just for check if instanceId is a checkpoint
+func liveTestlibHaveConflicts(r *replica.Replica, deps message.Dependencies, row int, instanceId uint64) bool {
+	if deps[row] == instanceId || r.IsCheckpoint(deps[row]) {
+		return true
+	}
+	return false
+}
+
+////////////////////////////////////////////////////////
+//                                                    //
+//                      Tests                         //
+//                                                    //
+////////////////////////////////////////////////////////
+
+func liveTestlibVerifyDependency(r *replica.Replica, pos uint64) bool {
+	N := len(r.InstanceMatrix)
+
+	deps := make([]message.Dependencies, N)
+	for i, inst := range r.InstanceMatrix {
+		if inst[pos] == nil {
+			return true
+		}
+		deps[i] = inst[pos].Dependencies()
+	}
+
+	// check if the one depend on the other, or if it's a checkpoint
+	for p := 0; p < N; p++ {
+		for q := 0; q < N; q++ {
+			if p == 0 {
+				continue
+			}
+			if liveTestlibHaveConflicts(r, deps[p], q, pos) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Test Scenario: Non-conflict commands, 1 proposer
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica1ProposerNoConflict(t *testing.T) {
-	maxInstance := 1024 * 48
-	allCmds := make([]data.Commands, maxInstance)
+	maxInstance := 1024 * 2
+	allCmds := make([]message.Commands, maxInstance)
 
 	nodes := livetestlibSetupCluster(3)
+	defer livetestlibStopCluster(nodes)
 
 	for i := 0; i < maxInstance; i++ {
 		cmds := livetestlibExampleCommands(i)
-		nodes[0].BatchPropose(cmds)
+		go nodes[0].Propose(cmds...) // batching disabled
 		allCmds[i] = cmds
 	}
-	time.Sleep(1000 * time.Millisecond)
+	fmt.Println("Wait 5 seconds for completion")
+	time.Sleep(5 * time.Second)
 
 	// test log consistency
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
@@ -133,78 +236,127 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica3ProposerNoConflict(t *testing.T) {
 	N := 3
-	maxInstance := 1024 * 4
+	maxInstance := 1024 * 2
 	nodes := livetestlibSetupCluster(N)
+	defer livetestlibStopCluster(nodes)
 
 	for i := 0; i < maxInstance; i++ {
 		for j := range nodes {
 			index := i*N + j
 			cmds := livetestlibExampleCommands(index)
-			nodes[j].BatchPropose(cmds)
+			go nodes[j].Propose(cmds...) // batching disabled
 		}
 	}
-	time.Sleep(100 * time.Microsecond)
+	fmt.Println("Wait 5 Seconds for completion")
+	time.Sleep(5 * time.Second)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 }
 
 func Test2ProposerConflict(t *testing.T) {
-	maxInstance := 1024
+	maxInstance := 2048
 	nodes := livetestlibSetupCluster(3)
+	defer livetestlibStopCluster(nodes)
 
 	// node 0 and 1 are conflicted with each other
 	for i := 1; i < maxInstance; i++ {
 		for j := 0; j < 2; j++ {
 			cmds := livetestlibExampleCommands(i)
-			nodes[j].BatchPropose(cmds)
+			go nodes[j].Propose(cmds...) // batching disabled
 		}
 	}
-
-	time.Sleep(100 * time.Microsecond)
+	fmt.Println("Wait 5 Seconds for completion")
+	time.Sleep(5 * time.Second)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 
 	for i := 1; i < maxInstance; i++ {
-		deps1 := nodes[0].InstanceMatrix[0][i].Dependencies()
-		deps2 := nodes[0].InstanceMatrix[1][i].Dependencies()
-		pos := uint64(i)
-		if !assert.Equal(t, deps1[1], pos) ||
-			!assert.Equal(t, deps2[0], pos) {
-			t.Fatal("Incorrect conflict")
+		if nodes[0].IsCheckpoint(uint64(i)) {
+			continue
 		}
+
+		pos := uint64(i)
+		assert.True(t, liveTestlibVerifyDependency(nodes[0], pos))
 	}
 }
 
 func Test3ProposerConflict(t *testing.T) {
-	maxInstance := 1024
-	nodes := livetestlibSetupCluster(3)
+	N := 3
+	maxInstance := 2048
+	nodes := livetestlibSetupCluster(N)
+	defer livetestlibStopCluster(nodes)
 
 	// node 0 must conflict with 1, maybe with 2
 	// node 1 must conflict with 0, maybe with 2
 	// node 2 must conflict with 0, maybe with 1
 	for i := 1; i < maxInstance; i++ {
-		for j := 0; j < 3; j++ {
+		for j := 0; j < N; j++ {
 			cmds := livetestlibExampleCommands(i)
-			nodes[j].BatchPropose(cmds)
+			go nodes[j].Propose(cmds...) //batching disabled
 		}
 	}
-
-	time.Sleep(100 * time.Microsecond)
+	fmt.Println("Wait 5 seconds for completion")
+	time.Sleep(5 * time.Second)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 
-	deps := make([]data.Dependencies, 3)
 	for i := 1; i < maxInstance; i++ {
-		deps[0] = nodes[0].InstanceMatrix[0][i].Dependencies()
-		deps[1] = nodes[0].InstanceMatrix[1][i].Dependencies()
-		deps[2] = nodes[0].InstanceMatrix[2][i].Dependencies()
-		pos := uint64(i)
-
-		if !assert.Equal(t, deps[0][1], pos) ||
-			!assert.Equal(t, deps[1][0], pos) ||
-			!assert.Equal(t, deps[2][0], pos) {
-			t.Fatal("Incorrect conflict")
+		if nodes[0].IsCheckpoint(uint64(i)) {
+			continue
 		}
 
+		pos := uint64(i)
+		assert.True(t, liveTestlibVerifyDependency(nodes[0], pos))
+	}
+}
+
+// Test Scenario: Non-conflict commands, 3 proposers
+// Expect: All replicas have same correct logs(cmds, deps) eventually
+func Test3Replica3ProposerNoConflictTimeout(t *testing.T) {
+	N := 3
+	maxInstance := 1024 * 4
+	nodes := livetestlibSetupEasyTimeoutCluster(N)
+	defer livetestlibStopCluster(nodes)
+
+	for i := 0; i < maxInstance; i++ {
+		for j := range nodes {
+			index := i*N + j
+			cmds := livetestlibExampleCommands(index)
+			go nodes[j].Propose(cmds...) // batching disabled
+		}
+	}
+	fmt.Println("Wait 15 Seconds for completion")
+	time.Sleep(15 * time.Second)
+
+	assert.True(t, livetestlibLogConsistent(t, nodes...))
+}
+
+func Test3ProposerConflictTimeout(t *testing.T) {
+	N := 3
+	maxInstance := 2048
+	nodes := livetestlibSetupEasyTimeoutCluster(N)
+	defer livetestlibStopCluster(nodes)
+
+	// node 0 must conflict with 1, maybe with 2
+	// node 1 must conflict with 0, maybe with 2
+	// node 2 must conflict with 0, maybe with 1
+	for i := 1; i < maxInstance; i++ {
+		for j := 0; j < N; j++ {
+			cmds := livetestlibExampleCommands(i)
+			go nodes[j].Propose(cmds...) //batching disabled
+		}
+	}
+	fmt.Println("Wait 15 seconds for completion")
+	time.Sleep(15 * time.Second)
+
+	assert.True(t, livetestlibLogConsistent(t, nodes...))
+
+	for i := 1; i < maxInstance; i++ {
+		if nodes[0].IsCheckpoint(uint64(i)) {
+			continue
+		}
+
+		pos := uint64(i)
+		assert.True(t, liveTestlibVerifyDependency(nodes[0], pos))
 	}
 }

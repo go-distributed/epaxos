@@ -12,20 +12,28 @@ package replica
 // - This is used to decrease the size of conflict scanning space.
 
 import (
+	"bytes"
 	"container/list"
-	"encoding/json"
+	"encoding/gob"
 	"errors"
-	"net"
+	"fmt"
 	"sort"
 	"time"
 
-	"github.com/golang/glog"
-
 	"github.com/go-distributed/epaxos"
-	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/message"
+	"github.com/go-distributed/epaxos/persistent"
+	"github.com/golang/glog"
 )
 
-var v1Log = glog.V(0)
+// #if test
+var v1Log = glog.V(2)
+var v2Log = glog.V(2)
+
+// #else
+// var v1Log = glog.V(1)
+// var v2Log = glog.V(2)
+// #end
 
 var (
 	errConflictsNotFullyResolved = errors.New("Conflicts not fully resolved")
@@ -38,7 +46,6 @@ const (
 	defaultInstancesLength = 1024 * 64
 	conflictNotFound       = 0
 	epochStart             = 1
-	executeInterval        = 5 * time.Millisecond
 )
 
 // actions
@@ -49,181 +56,347 @@ const (
 	broadcastAction
 )
 
+const (
+	defaultClusterSize     = 3
+	defaultCheckpointCycle = 1024
+	defaultBatchInterval   = time.Millisecond * 50
+	defaultTimeoutInterval = time.Millisecond * 50
+	defaultExecuteInterval = time.Millisecond * 50
+)
+
+const defaultStartPort = 8080
+
 // ****************************
 // ***** TYPE STRUCT **********
 // ****************************
 
+type PackedReplica struct {
+	Id             uint8
+	Size           uint8
+	MaxInstanceNum []uint64
+	ExecutedUpTo   []uint64
+	ProposeNum     uint64
+}
+
 type Replica struct {
-	Id               uint8
-	Size             uint8
-	MaxInstanceNum   []uint64 // the highest instance number seen for each replica
-	ProposeNum       uint64
-	ProposeChan      chan data.Command
-	BatchInterval    time.Duration
-	CheckpointCycle  uint64
-	ExecutedUpTo     []uint64
-	InstanceMatrix   [][]*Instance
-	StateMachine     epaxos.StateMachine
-	Epoch            uint32
-	MessageEventChan chan *MessageEvent
-	Addrs            []string
-	Transporter
+	Id              uint8
+	Size            uint8
+	MaxInstanceNum  []uint64 // the highest instance number seen for each replica
+	ProposeNum      uint64
+	ProposeChan     chan *proposeRequest
+	BatchInterval   time.Duration
+	TimeoutInterval time.Duration
+
+	CheckpointCycle uint64
+	ExecutedUpTo    []uint64
+	InstanceMatrix  [][]*Instance
+	StateMachine    epaxos.StateMachine
+	Epoch           uint32
+	MessageChan     chan message.Message
+	Addrs           []string
+	Transporter     epaxos.Transporter
 
 	// tarjan SCC
 	sccStack   *list.List
 	sccResults [][]*Instance
 	sccIndex   int
+
+	// tickers
+	executeTicker *time.Ticker
+	timeoutTicker *time.Ticker
+	proposeTicker *time.Ticker
+
+	// triggers
+	executeTrigger chan bool
+
+	// controllers
+	enableBatching bool
+	stop           chan struct{}
+
+	// persistent store
+	enablePersistent bool
+	store            *persistent.LevelDB
 }
 
 type Param struct {
-	Addrs           []string
-	ReplicaId       uint8
-	Size            uint8
-	StateMachine    epaxos.StateMachine
-	CheckpointCycle uint64
-	BatchInterval   time.Duration
+	ReplicaId        uint8
+	Size             uint8
+	StateMachine     epaxos.StateMachine
+	CheckpointCycle  uint64
+	BatchInterval    time.Duration
+	TimeoutInterval  time.Duration
+	ExecuteInterval  time.Duration
+	Addrs            []string
+	Transporter      epaxos.Transporter
+	EnableBatching   bool
+	EnablePersistent bool
+	Restore          bool
+	PersistentPath   string
 }
 
-type MessageEvent struct {
-	From    uint8
-	Message Message
+type proposeRequest struct {
+	cmds message.Commands
+	id   chan uint64
 }
 
-// TODO: add replica error in return values
-func New(param *Param) *Replica {
-	replicaId := param.ReplicaId
-	size := param.Size
-	sm := param.StateMachine
-	cycle := uint64(1024)
+func newProposeRequest(command ...message.Command) *proposeRequest {
+	return &proposeRequest{
+		cmds: message.Commands(command),
+		id:   make(chan uint64, 1), // avoid blocking
+	}
+}
 
-	if size%2 == 0 {
-		panic("Use odd number as quorum size")
+func verifyparam(param *Param) error {
+	// TODO: replicaID, uuid
+	if param.Size == 0 {
+		param.Size = defaultClusterSize
+	}
+	if param.Size%2 == 0 {
+		// TODO: epaxos replica error
+		return fmt.Errorf("Use odd number as quorum size")
+	}
+	if param.CheckpointCycle == 0 {
+		param.CheckpointCycle = defaultCheckpointCycle
+	}
+	if param.BatchInterval == 0 {
+		param.BatchInterval = defaultBatchInterval
+	}
+	if param.TimeoutInterval == 0 {
+		param.TimeoutInterval = defaultTimeoutInterval
+	}
+	if param.ExecuteInterval == 0 {
+		param.ExecuteInterval = defaultExecuteInterval
+	}
+	if param.Addrs == nil {
+		param.Addrs = make([]string, param.Size)
+		for i := 0; i < int(param.Size); i++ {
+			param.Addrs[i] = fmt.Sprintf("localhost:%d", defaultStartPort+i)
+		}
+	}
+	if param.Transporter == nil {
+		return fmt.Errorf("No specified transporter")
+	}
+	return nil
+}
+
+func New(param *Param) (*Replica, error) {
+	err := verifyparam(param)
+	if err != nil {
+		return nil, err
 	}
 
 	r := &Replica{
-		Id:               replicaId,
-		Size:             size,
-		MaxInstanceNum:   make([]uint64, size),
-		ProposeNum:       1, // instance.id start from 1
-		ProposeChan:      make(chan data.Command),
-		BatchInterval:    5 * time.Millisecond,
-		CheckpointCycle:  cycle,
-		ExecutedUpTo:     make([]uint64, size),
-		InstanceMatrix:   make([][]*Instance, size),
-		StateMachine:     sm,
-		Epoch:            epochStart,
-		MessageEventChan: make(chan *MessageEvent),
-		sccStack:         list.New(),
-		Addrs:            param.Addrs,
+		Id:              param.ReplicaId,
+		Size:            param.Size,
+		MaxInstanceNum:  make([]uint64, param.Size),
+		ProposeNum:      1, // instance.id start from 1
+		ProposeChan:     make(chan *proposeRequest, 1024),
+		BatchInterval:   param.BatchInterval,
+		TimeoutInterval: param.TimeoutInterval,
+		CheckpointCycle: param.CheckpointCycle,
+		ExecutedUpTo:    make([]uint64, param.Size),
+		InstanceMatrix:  make([][]*Instance, param.Size),
+		StateMachine:    param.StateMachine,
+		Epoch:           epochStart,
+		MessageChan:     make(chan message.Message, 1024),
+		sccStack:        list.New(),
+		Addrs:           param.Addrs,
+		Transporter:     param.Transporter,
+
+		executeTicker: time.NewTicker(param.ExecuteInterval),
+		timeoutTicker: time.NewTicker(param.TimeoutInterval),
+		proposeTicker: time.NewTicker(param.BatchInterval),
+
+		executeTrigger:   make(chan bool),
+		stop:             make(chan struct{}),
+		enableBatching:   param.EnableBatching,
+		enablePersistent: param.EnablePersistent,
 	}
 
-	for i := uint8(0); i < size; i++ {
+	var path string
+	if param.PersistentPath == "" {
+		path = fmt.Sprintf("%s-%d", "/dev/shm/test", r.Id)
+	} else {
+		path = param.PersistentPath
+	}
+
+	r.store, err = persistent.NewLevelDB(path, param.Restore)
+	if err != nil {
+		glog.Errorln("replica.New: failed to make new storage")
+		return nil, err
+	}
+
+	for i := uint8(0); i < param.Size; i++ {
 		r.InstanceMatrix[i] = make([]*Instance, defaultInstancesLength)
 		r.MaxInstanceNum[i] = conflictNotFound
+		r.ExecutedUpTo[i] = conflictNotFound
 	}
 
-	return r
+	// restore replica and instances
+	if param.Restore {
+		err := r.RecoverFromPersistent()
+		if err != nil {
+			glog.Errorln("Recover from persistent failed!")
+			return nil, err
+		}
+	}
+
+	r.Transporter.RegisterChannel(r.MessageChan)
+
+	if !r.enableBatching {
+		// stop ticker
+		r.proposeTicker.Stop()
+	}
+
+	return r, nil
 }
 
 // Start running the replica. It shouldn't stop at any time.
 func (r *Replica) Start() error {
-	listener, err := net.Listen("udp", r.Addrs[r.Id])
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				glog.Errorln("listener is closed:", err)
-				return
-			}
-
-			go func(c net.Conn) {
-				// TODO: message size re-thought
-				data := make([]byte, 8192)
-				n, err := c.Read(data)
-				if err != nil {
-					glog.Errorln("UDP read:", err)
-					return
-				}
-
-				msgEvent := new(MessageEvent)
-				json.Unmarshal(data[:n], msgEvent)
-				r.MessageEventChan <- msgEvent
-			}(conn)
-		}
-	}()
-
 	go r.eventLoop()
-	//go r.executeLoop()
+	go r.executeLoop()
 	go r.proposeLoop()
-	return nil
+	go r.timeoutLoop()
+	return r.Transporter.Start()
+}
+
+func (r *Replica) stopTickers() {
+	r.executeTicker.Stop()
+	r.timeoutTicker.Stop()
+	r.proposeTicker.Stop()
+}
+
+func (r *Replica) Stop() {
+	close(r.stop)
+	r.stopTickers()
+	r.Transporter.Stop()
+	r.store.Close()
+}
+
+func (r *Replica) timeoutLoop() {
+	for {
+		select {
+		case <-r.stop:
+			return
+		case <-r.timeoutTicker.C:
+			r.checkTimeout()
+		}
+	}
+}
+
+func (r *Replica) checkTimeout() {
+	for i, instance := range r.InstanceMatrix {
+
+		// from executeupto to max, test timestamp,
+		// if timeout, then send prepare
+		for j := r.ExecutedUpTo[i] + 1; j <= r.MaxInstanceNum[i]; j++ {
+			if r.IsCheckpoint(j) { // [*]Note: the first instance is also a checkpoint
+				continue
+			}
+			if instance[j] == nil || instance[j].isTimeout() {
+				r.MessageChan <- r.makeTimeout(uint8(i), j)
+			}
+		}
+	}
+}
+
+func (r *Replica) makeTimeout(rowId uint8, instanceId uint64) message.Message {
+	return &message.Timeout{
+		ReplicaId:  rowId,
+		InstanceId: instanceId,
+		From:       r.Id,
+	}
 }
 
 // handling events
+// TODO: differentiate internal and external messages
 func (r *Replica) eventLoop() {
 	for {
-		// TODO: check timeout
-		// add time.After for timeout checking
 		select {
-		case mevent := <-r.MessageEventChan:
-			r.dispatch(mevent)
+		case <-r.stop:
+			return
+		case msg := <-r.MessageChan:
+			r.dispatch(msg)
 		}
 	}
 }
 
 func (r *Replica) executeLoop() {
 	for {
-		time.Sleep(executeInterval)
-		// execution of committed instances
-		r.findAndExecute()
-	}
-}
-
-func (r *Replica) proposeLoop() {
-	proposeTicker := time.Tick(r.BatchInterval)
-
-	bufferedCmds := make([]data.Command, 0)
-
-	for {
 		select {
-		case cmd := <-r.ProposeChan:
-			bufferedCmds = append(bufferedCmds, cmd)
-		case <-proposeTicker:
-			if len(bufferedCmds) == 0 {
-				break
-			}
-			r.BatchPropose(bufferedCmds)
-			bufferedCmds = bufferedCmds[:0]
+		case <-r.stop:
+			return
+		case <-r.executeTicker.C:
+			// execution of committed instances
+			r.findAndExecute()
+		case <-r.executeTrigger:
+			r.findAndExecute()
 		}
 	}
 }
 
-// TODO: This must be done in a synchronized/atomic way.
-func (r *Replica) Propose(cmd data.Command) {
-	r.ProposeChan <- cmd
+func (r *Replica) proposeLoop() {
+	bufferedRequests := make([]*proposeRequest, 0) // start from 0
+
+	for {
+		select {
+		case <-r.stop:
+			return
+		case req := <-r.ProposeChan:
+			bufferedRequests = append(bufferedRequests, req)
+			if !r.enableBatching {
+				r.BatchPropose(&bufferedRequests)
+			}
+		case <-r.proposeTicker.C:
+			r.BatchPropose(&bufferedRequests)
+		}
+	}
+}
+
+// return the channel containing the internal instance id
+func (r *Replica) Propose(cmds ...message.Command) chan uint64 {
+	req := newProposeRequest(cmds...)
+	r.ProposeChan <- req
+	return req.id
 }
 
 // TODO: This must be done in a synchronized/atomic way.
-func (r *Replica) BatchPropose(batchedCmds data.Commands) {
-	cmds := make([]data.Command, len(batchedCmds))
-	copy(cmds, batchedCmds)
+func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
+	defer func() { *batchedRequests = (*batchedRequests)[:0] }() // resize
 
-	mevent := &MessageEvent{
-		From: r.Id,
-		Message: &data.Propose{
-			ReplicaId:  r.Id,
-			InstanceId: r.ProposeNum,
-			Cmds:       cmds,
-		},
+	br := *batchedRequests
+	if len(br) == 0 {
+		return
 	}
+
+	// copy commands
+	cmds := make([]message.Command, 0)
+	for i := range br {
+		cmds = append(cmds, br[i].cmds...)
+	}
+
+	// record the current instance id
+	iid := r.ProposeNum
+	proposal := message.NewPropose(r.Id, iid, cmds)
+
+	// update propose num
 	r.ProposeNum++
 	if r.IsCheckpoint(r.ProposeNum) {
 		r.ProposeNum++
 	}
-	r.MessageEventChan <- mevent
+	r.StoreReplica()
+
+	// TODO: we could use another channel
+	// and with synchronization to improve throughput
+	r.MessageChan <- proposal
+
+	// wait for the construction of instance and
+	// send back its id
+	<-proposal.Created
+	for _, req := range br {
+		req.id <- iid
+		close(req.id)
+	}
 }
 
 // *****************************
@@ -231,13 +404,17 @@ func (r *Replica) BatchPropose(batchedCmds data.Commands) {
 // *****************************
 
 // This function is responsible for communicating with instance processing.
-func (r *Replica) dispatch(mevent *MessageEvent) {
-	eventMsg := mevent.Message
-	replicaId := eventMsg.Replica()
-	instanceId := eventMsg.Instance()
+func (r *Replica) dispatch(msg message.Message) {
+	replicaId := msg.Replica()
+	instanceId := msg.Instance()
+
+	r.updateMaxInstanceNum(replicaId, instanceId)
 
 	v1Log.Infof("Replica[%v]: recv message[%s], from Replica[%v]\n",
-		r.Id, eventMsg.String(), mevent.From)
+		r.Id, msg.String(), msg.Sender())
+	if glog.V(0) {
+		printDependencies(msg)
+	}
 
 	if instanceId <= conflictNotFound {
 		panic("")
@@ -245,51 +422,65 @@ func (r *Replica) dispatch(mevent *MessageEvent) {
 
 	if r.InstanceMatrix[replicaId][instanceId] == nil {
 		r.InstanceMatrix[replicaId][instanceId] = NewInstance(r, replicaId, instanceId)
+		if p, ok := msg.(*message.Propose); ok {
+			// send back a signal for this successfully creation
+			close(p.Created)
+		}
 	}
 
 	i := r.InstanceMatrix[replicaId][instanceId]
-	var action uint8
-	var msg Message
+	i.touch() // update last touched timestamp
 
-	v1Log.Infof("Replica[%v]: instance[%v][%v] status before = %v\n",
-		r.Id, replicaId, instanceId, i.StatusString())
+	v1Log.Infof("Replica[%v]: instance[%v][%v] status before = %v, ballot = [%v]\n",
+		r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
+	v2Log.Infof("dependencies before: %v\n", i.Dependencies())
+
+	var action uint8
+	var rep message.Message
 
 	switch i.status {
 	case nilStatus:
-		action, msg = i.nilStatusProcess(eventMsg)
+		action, rep = i.nilStatusProcess(msg)
 	case preAccepted:
-		action, msg = i.preAcceptedProcess(eventMsg)
+		action, rep = i.preAcceptedProcess(msg)
 	case accepted:
-		action, msg = i.acceptedProcess(eventMsg)
+		action, rep = i.acceptedProcess(msg)
 	case committed:
-		action, msg = i.committedProcess(eventMsg)
+		action, rep = i.committedProcess(msg)
+	case preparing:
+		action, rep = i.preparingProcess(msg)
 	default:
 		panic("")
 	}
 
-	if i.isAtStatus(committed) && action == noAction {
-		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v\n\n",
-			r.Id, replicaId, instanceId, i.StatusString())
+	v2Log.Infof("dependencies after: %v\n", i.Dependencies())
+	if action == noAction {
+		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v, ballot = [%v]\n\n\n",
+			r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
 	} else {
-		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v\n",
-			r.Id, replicaId, instanceId, i.StatusString())
+		v1Log.Infof("Replica[%v]: instance[%v][%v] status after = %v, ballot = [%v]\n",
+			r.Id, replicaId, instanceId, i.StatusString(), i.ballot.String())
+	}
+
+	if r.enablePersistent {
+		r.StoreSingleInstance(i)
 	}
 
 	switch action {
 	case noAction:
 		return
 	case replyAction:
-		v1Log.Infof("Replica[%v]: send message[%s], to Replica[%v]\n\n",
-			r.Id, msg.String(), mevent.From)
-		r.Transporter.Send(mevent.From, msg)
+		v1Log.Infof("Replica[%v]: send message[%s], to Replica[%v]\n\n\n",
+			r.Id, rep.String(), msg.Sender())
+		r.Transporter.Send(msg.Sender(), rep) // send back to the sender of the message
 	case fastQuorumAction:
-		v1Log.Infof("Replica[%v]: send message[%s], to FastQuorum\n\n",
-			r.Id, msg.String(), mevent.From)
-		r.Transporter.MulticastFastquorum(msg)
+		v1Log.Infof("Replica[%v]: send message[%s], to FastQuorum\n\n\n",
+			r.Id, rep.String())
+		r.Transporter.MulticastFastquorum(rep)
 	case broadcastAction:
-		v1Log.Infof("Replica[%v]: send message[%s], to Everyone\n\n",
-			r.Id, msg.String(), mevent.From)
-		r.Transporter.Broadcast(msg)
+		v1Log.Infof("Replica[%v]: send message[%s], to Everyone\n\n\n",
+			r.Id, rep.String())
+		r.Transporter.Broadcast(rep)
 	default:
 		panic("")
 	}
@@ -310,22 +501,22 @@ func (r *Replica) quorum() int {
 	return int(r.Size / 2)
 }
 
-func (r *Replica) makeInitialBallot() *data.Ballot {
-	return data.NewBallot(r.Epoch, 0, r.Id)
+func (r *Replica) makeInitialBallot() *message.Ballot {
+	return message.NewBallot(r.Epoch, 0, r.Id)
 }
 
-func (r *Replica) makeInitialDeps() data.Dependencies {
-	return make(data.Dependencies, r.Size)
+func (r *Replica) makeInitialDeps() message.Dependencies {
+	return make(message.Dependencies, r.Size)
 }
 
 // This func initiate a new instance, construct its commands and dependencies
 // TODO: this operation should synchronized/atomic
-func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
+func (r *Replica) initInstance(cmds message.Commands, i *Instance) {
 	if i.rowId != r.Id {
 		panic("")
 	}
 
-	deps := make(data.Dependencies, r.Size)
+	deps := make(message.Dependencies, r.Size)
 
 	for curr := range r.InstanceMatrix {
 		instances := r.InstanceMatrix[curr]
@@ -340,18 +531,19 @@ func (r *Replica) initInstance(cmds data.Commands, i *Instance) {
 		conflict := r.scanConflicts(instances, cmds, start, 0)
 		deps[curr] = conflict
 	}
-	i.cmds, i.deps = cmds, deps
+	i.cmds, i.deps = cmds.Clone(), deps.Clone()
 	// we can only update here because
 	// now we are safe to have cmds, etc. inside instance
-	if !i.replica.updateMaxInstanceNum(i.rowId, i.id) {
-		panic("")
-	}
+	//if !i.replica.updateMaxInstanceNum(i.rowId, i.id) {
+	//	panic("")
+	//}
+	i.replica.updateMaxInstanceNum(i.rowId, i.id)
 }
 
 // This func updates the passed in dependencies from replica[from].
 // return updated dependencies and whether the dependencies has changed.
 // TODO: this operation should synchronized/atomic
-func (r *Replica) updateInstance(cmds data.Commands, deps data.Dependencies, from uint8, i *Instance) bool {
+func (r *Replica) updateInstance(cmds message.Commands, deps message.Dependencies, from uint8, i *Instance) bool {
 	changed := false
 
 	for curr := range r.InstanceMatrix {
@@ -383,7 +575,7 @@ func (r *Replica) IsCheckpoint(n uint64) bool {
 
 // scanConflicts scans the instances from start to end (high to low).
 // return the highest instance that has conflicts with passed in cmds.
-func (r *Replica) scanConflicts(instances []*Instance, cmds data.Commands, start uint64, end uint64) uint64 {
+func (r *Replica) scanConflicts(instances []*Instance, cmds message.Commands, start uint64, end uint64) uint64 {
 	for i := start; i > end; i-- {
 		if r.IsCheckpoint(i) {
 			return i
@@ -401,6 +593,9 @@ func (r *Replica) scanConflicts(instances []*Instance, cmds data.Commands, start
 }
 
 func (r *Replica) updateMaxInstanceNum(rowId uint8, instanceId uint64) bool {
+	if r.enablePersistent {
+		defer r.StoreReplica()
+	}
 	if r.MaxInstanceNum[rowId] < instanceId {
 		r.MaxInstanceNum[rowId] = instanceId
 		return true
@@ -453,6 +648,7 @@ func (r *Replica) execute(i *Instance) error {
 	r.sccStack.Init()
 	r.sccResults = make([][]*Instance, 0)
 	r.sccIndex = 1
+
 	if ok := r.resolveConflicts(i); !ok {
 		return errConflictsNotFullyResolved
 	}
@@ -469,23 +665,33 @@ func (r *Replica) execute(i *Instance) error {
 
 // this should be a transaction.
 func (r *Replica) executeList() error {
-	cmdsBuffer := make([]data.Command, 0)
+	cmdsBuffer := make([]message.Command, 0)
 
 	// batch all commands in the scc
 	for _, sccNodes := range r.sccResults {
+		//for _, instance := range sccNodes {
+		//v2Log.Infof("Instance [%v][%v] executed\n", instance.rowId, instance.id)
+		//}
+		//v2Log.Infoln()
+
 		cmdsBuffer = cmdsBuffer[:0]
 		for _, instance := range sccNodes {
 			cmdsBuffer = append(cmdsBuffer, instance.cmds...)
 		}
 		// return results from state machine are not being used currently
 
+		// TODO: the results from statemachine should be relayed to callback
+		//      of some client function
 		_, err := r.StateMachine.Execute(cmdsBuffer)
 		if err != nil {
 			return err
 		}
-		// TODO: transaction one SCC
+		// TODO: transaction one
 		for _, instance := range sccNodes {
 			instance.SetExecuted()
+		}
+		if r.enablePersistent {
+			r.StoreInstances(sccNodes...)
 		}
 	}
 	return nil
@@ -510,7 +716,8 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 		}
 
 		neighbor := r.InstanceMatrix[iSpace][dep]
-		if !neighbor.isAtStatus(committed) {
+		if neighbor == nil || !neighbor.isAtStatus(committed) {
+			r.clearStack()
 			return false
 		}
 
@@ -520,14 +727,15 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 
 		if neighbor.sccIndex == 0 {
 			if ok := r.resolveConflicts(neighbor); !ok {
+				r.clearStack()
 				return false
 			}
 			if neighbor.sccLowlink < node.sccLowlink {
 				node.sccLowlink = neighbor.sccLowlink
 			}
 		} else if r.inSccStack(neighbor) {
-			if neighbor.sccIndex < node.sccLowlink {
-				node.sccLowlink = neighbor.sccIndex
+			if neighbor.sccLowlink < node.sccLowlink {
+				node.sccLowlink = neighbor.sccLowlink
 			}
 		}
 	}
@@ -590,4 +798,162 @@ func (s sccNodesQueue) Less(i, j int) bool {
 		return s[i].id < s[j].id
 	}
 	return false
+}
+
+func printDependencies(msg message.Message) {
+	switch m := msg.(type) {
+	case *message.PreAccept:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	case *message.PreAcceptReply:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	case *message.Accept:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	case *message.PrepareReply:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	case *message.Commit:
+		v2Log.Infof("dependencies: %v\n", m.Deps)
+	}
+}
+
+// store and restore the instance
+func (r *Replica) StoreSingleInstance(inst *Instance) error {
+	var buffer bytes.Buffer
+
+	p := inst.Pack()
+	key := fmt.Sprintf("%v-%v-%v", r.Id, p.RowId, p.Id)
+	enc := gob.NewEncoder(&buffer)
+	err := enc.Encode(p)
+	if err != nil {
+		return err
+	}
+	return r.store.Put(key, buffer.Bytes())
+}
+
+func (r *Replica) RestoreSingleInstance(rowId uint8, instanceId uint64) (*Instance, error) {
+	inst := NewInstance(r, rowId, instanceId)
+	var p PackedInstance
+
+	key := fmt.Sprintf("%v-%v-%v", r.Id, inst.rowId, inst.id)
+	b, err := r.store.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	buffer := bytes.NewBuffer(b)
+	dec := gob.NewDecoder(buffer)
+	err = dec.Decode(&p)
+	if err != nil {
+		return nil, err
+	}
+	inst.Unpack(&p)
+	return inst, nil
+}
+
+func (r *Replica) StoreInstances(insts ...*Instance) error {
+	kvs := make([]*epaxos.KVpair, len(insts))
+	for i := range insts {
+		var buffer bytes.Buffer
+		p := insts[i].Pack()
+		key := fmt.Sprintf("%v-%v-%v", r.Id, insts[i].rowId, insts[i].id)
+		enc := gob.NewEncoder(&buffer)
+		err := enc.Encode(p)
+		if err != nil {
+			return err
+		}
+		kvs[i] = &epaxos.KVpair{
+			Key:   key,
+			Value: buffer.Bytes(),
+		}
+	}
+	return r.store.BatchPut(kvs)
+}
+
+// pack and unpack the replica
+func (r *Replica) Pack() *PackedReplica {
+	p := &PackedReplica{
+		Id:             r.Id,
+		Size:           r.Size,
+		MaxInstanceNum: make([]uint64, r.Size),
+		ExecutedUpTo:   make([]uint64, r.Size),
+		ProposeNum:     r.ProposeNum,
+	}
+	for i := uint8(0); i < r.Size; i++ {
+		p.MaxInstanceNum[i] = r.MaxInstanceNum[i]
+		p.ExecutedUpTo[i] = r.ExecutedUpTo[i]
+	}
+	return p
+}
+
+func (r *Replica) Unpack(p *PackedReplica) {
+	r.Id = p.Id
+	r.Size = p.Size
+	for i := uint8(0); i < r.Size; i++ {
+		r.MaxInstanceNum[i] = p.MaxInstanceNum[i]
+		r.ExecutedUpTo[i] = p.ExecutedUpTo[i]
+	}
+	r.ProposeNum = p.ProposeNum
+}
+
+// store and restore the replica
+func (r *Replica) StoreReplica() error {
+	var buffer bytes.Buffer
+
+	p := r.Pack()
+	key := fmt.Sprintf("%v-replica", r.Id)
+	enc := gob.NewEncoder(&buffer)
+	err := enc.Encode(p)
+	if err != nil {
+		return err
+	}
+	return r.store.Put(key, buffer.Bytes())
+}
+
+func (r *Replica) RestoreReplica() error {
+	var p PackedReplica
+
+	key := fmt.Sprintf("%v-replica", r.Id)
+	b, err := r.store.Get(key)
+	if err != nil {
+		return err
+	}
+	buffer := bytes.NewBuffer(b)
+	dec := gob.NewDecoder(buffer)
+	err = dec.Decode(&p)
+	r.Unpack(&p)
+
+	return nil
+}
+
+// recover from persistent storage
+func (r *Replica) RecoverFromPersistent() error {
+	err := r.RestoreReplica()
+	if err != nil {
+		glog.Errorln("replica.New: failed to restore replica info")
+		return err
+	}
+
+	for i := uint8(0); i < r.Size; i++ {
+		for j := uint64(0); j <= r.MaxInstanceNum[i]; j++ {
+			if r.IsCheckpoint(j) {
+				continue
+			}
+			inst, err := r.RestoreSingleInstance(i, j)
+			if err != nil && err != epaxos.ErrorNotFound {
+				glog.Errorf("replica.New: failed to restore instance info, for [%v][%v]\n", i, j)
+				return err
+			}
+			r.InstanceMatrix[i][j] = inst
+		}
+	}
+	return nil
+}
+
+func (r *Replica) clearStack() {
+	iter := r.sccStack.Front()
+	for iter != nil {
+		instance := iter.Value.(*Instance)
+		instance.sccIndex = 0
+		instance.sccLowlink = 0
+		iter = iter.Next()
+	}
+	r.sccStack.Init()
 }

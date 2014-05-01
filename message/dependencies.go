@@ -1,4 +1,4 @@
-package data
+package message
 
 type Dependencies []uint64
 
@@ -26,7 +26,7 @@ func (d Dependencies) Union(other Dependencies) bool {
 
 func (d Dependencies) Clone() Dependencies {
 	if d == nil {
-		panic("")
+		return nil
 	}
 	deps := make(Dependencies, len(d))
 	copy(deps, d)

@@ -4,7 +4,7 @@ import (
 	"bytes"
 
 	"github.com/go-distributed/epaxos"
-	"github.com/go-distributed/epaxos/data"
+	"github.com/go-distributed/epaxos/message"
 )
 
 type DummySM struct {
@@ -17,10 +17,10 @@ func NewDummySM() *DummySM {
 	}
 }
 
-func (d *DummySM) Execute(c []data.Command) ([]interface{}, error) {
+func (d *DummySM) Execute(c []message.Command) ([]interface{}, error) {
 	result := make([]interface{}, 0)
 	for i := range c {
-		if bytes.Compare(c[i], data.Command("error")) == 0 {
+		if bytes.Compare(c[i], message.Command("error")) == 0 {
 			return nil, epaxos.ErrStateMachineExecution
 		}
 		result = append(result, string(c[i]))
@@ -29,7 +29,7 @@ func (d *DummySM) Execute(c []data.Command) ([]interface{}, error) {
 	return result, nil
 }
 
-func (d *DummySM) HaveConflicts(c1 []data.Command, c2 []data.Command) bool {
+func (d *DummySM) HaveConflicts(c1 []message.Command, c2 []message.Command) bool {
 	for i := range c1 {
 		for j := range c2 {
 			if bytes.Compare(c1[i], c2[j]) == 0 {

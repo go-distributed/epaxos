@@ -1,6 +1,5 @@
-package data
+package message
 
-// TODO: useless
 const (
 	ProposeMsg uint8 = iota + 1
 	PreAcceptMsg
@@ -11,4 +10,5 @@ const (
 	CommitMsg
 	PrepareMsg
 	PrepareReplyMsg
+	TimeoutMsg
 )
