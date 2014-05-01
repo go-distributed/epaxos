@@ -41,38 +41,58 @@ This repository has following dependencies:
 * github.com/golang/glog
 * code.google.com/p/leveldb-go/leveldb
 
-Please "go get" them before running any code.
+Please "go get" them before running any code. Or you can run:
 
+```bash
+$ ./build.sh
+```
 
 ### Run Test
 
-In *replica/*, *message/*, *persistent/* directories, run
+```bash
+$ ./test.sh
+```
+This will run several tests:
 
-    go test
+####Part I. static tests:
 
-These tests are unit-test code for our instance and replica module
+* Epaxos state machine
+* Execution module
+* Timeout module
+* Persistent module
 
-In *livetest/*, run
+####Part II, dynamic tests:
+* Log consistency test:
+ * Single proposer, sending non-conflicted commands
+ * Multiple proposer, sending non-conflicted commands
+ * Multiple proposer, sending conflicted commands
+ * Multiple proposer, sending conflicted commands, plus randomly timeouts
 
-    go test
 
-These tests are used to verify our replication and consistency correctness.
-
+* Failover test:
+ * Start a 3-node cluster
+ * Randomly kill one node
+ * Restart that node
+ 
 
 ### Run Demo
 
-We have written a very simple code to demonstrate consensus capability of our EPaxos
-protocol.
+We have implemented a simple state machine to demonstrate consensus capability of our EPaxos
+protocol. The state machine is a simple printer which prints the log in EPaxos instance spaces.
 
-Go to *demo/*, then run
+To run the demo
 
-    go run server.go [0|1|2]
+```bash
+$ cd demo
+$ go build
+$ ./demo -id=[0|1|2]
+```
 
-The final one is the id of replica.
-
-We have predefined 3 replicas listening on different ports on localhost.
-Each of them will propose random commands intervally and you shall see all of them printing
+In this demo, we will start 3 replicas, listening on different ports on localhost.
+The replicas will propose commands concurrently and you shall see all of them printing
 the same command sequences (logs).
+
+[Note: there will be chance that one command is executed twice, this is because the "print" operation is not idempotent. For non-idempotent commands, they should be handled by the state machine. For simplicity, we didn't implement that in the demo. (Hopefully, this is very rare to happen in the test...)]
 
 ### Node Failure and Recovery
 
@@ -81,6 +101,28 @@ same command as logs are replicated across them. Now if you kill one or two, and
 again, the failed ones will recovery from crash logs and reinstate to original. All the logs
 will be made up later and begin proposing new commands too.
 
+
+### What We Have Done
+
+We have implemented the the basic EPaxos protocol. In out implementation, we divided the implementation into several modules:
+
+* Core, the EPaxos state machine
+* Execution Module
+* Timeout Module
+* Transportation Module
+* Persistent Storage Module
+
+Each module can be tested independently. Besides, in the core part, each state is a independent sub-module. We believe that such design can make the debugging much easier.
+
+### What We Will Do
+
+* Exploit the paralism in EPaxos (Now the event dispatcher is single-threaded)
+* Optimization on marshaling/unmarshaling
+* Add TCP transporter
+* Optimization on persistent module (Now the underlying storage is levelDB)
+* Dynamic reconfiguration
+* Longrun tests
+* Benchmark
 
 Contact
 ------
