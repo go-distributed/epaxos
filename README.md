@@ -30,31 +30,57 @@ We have [an SOSP 2013 paper](http://dl.acm.org/ft_gateway.cfm?id=2517350&ftid=14
 A simpler, more straightforward explanation is coming here soon.
 
 
-Repository File Structure
+How To Run And Test
 ------
 
-We are documenting directories description here.
+### Dependencies
 
-* **replica/**
+This repository has following dependencies:
 
-  The epaxos replica module.
+* github.com/stretchr/testify
+* github.com/golang/glog
+* code.google.com/p/leveldb-go/leveldb
 
-* **data/**
+Please "go get" them before running any code.
 
-  Message, commands and other related data module.
 
-* **doc/**
+### Run Test
 
-  General concepts explanation and blue print documentation.
-  For detailed documentation, please refer to individual moduel and files.
+In *replica/*, *message/*, *persistent/* directories, run
 
-* **test/**
+    go test
 
-  This directory contains example external modules (state machines, etc.) for testing purpose.
+These tests are unit-test code for our instance and replica module
 
-* **livetest/**
+In *livetest/*, run
 
-  Live testing modules.
+    go test
+
+These tests are used to verify our replication and consistency correctness.
+
+
+### Run Demo
+
+We have written a very simple code to demonstrate consensus capability of our EPaxos
+protocol.
+
+Go to *demo/*, then run
+
+    go run server.go [0|1|2]
+
+The final one is the id of replica.
+
+We have predefined 3 replicas listening on different ports on localhost.
+Each of them will propose random commands intervally and you shall see all of them printing
+the same command sequences (logs).
+
+### Node Failure and Recovery
+
+As stated in previous section, you can run 3 replicas and they will be continually print
+same command as logs are replicated across them. Now if you kill one or two, and then restart
+again, the failed ones will recovery from crash logs and reinstate to original. All the logs
+will be made up later and begin proposing new commands too.
+
 
 Contact
 ------
