@@ -22,6 +22,8 @@ package replica
 // - The initial ballot is (epoch, 0, replicaId)
 // @decision (04/18/14):
 // - Delete rejections to avoid complexity
+// @TOTHINK:
+// send pre-accept or accept for no-op? Now we send accept for no-op
 
 import (
 	"fmt"

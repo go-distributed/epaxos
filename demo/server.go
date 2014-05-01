@@ -28,7 +28,7 @@ type Voter struct{}
 //      but the exection is slow now, so it is unlikely to happen
 func (v *Voter) Execute(c []message.Command) ([]interface{}, error) {
 	if c == nil || len(c) == 0 {
-		fmt.Fprintln(os.Stderr, "No op")
+		fmt.Fprintln(os.Stderr, "From: No op")
 	} else {
 		for i := range c {
 			fmt.Fprintln(os.Stderr, string(c[i]))
@@ -75,6 +75,9 @@ func main() {
 		Restore:          restore,
 		TimeoutInterval:  time.Second,
 		//ExecuteInterval:  time.Second,
+	}
+	if restore {
+		fmt.Fprintln(os.Stderr, "===restore===")
 	}
 
 	fmt.Println("====== Spawn new replica ======")
