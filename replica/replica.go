@@ -285,18 +285,14 @@ func (r *Replica) timeoutLoop() {
 
 func (r *Replica) checkTimeout() {
 	for i, instance := range r.InstanceMatrix {
+
 		// from executeupto to max, test timestamp,
 		// if timeout, then send prepare
 		for j := r.ExecutedUpTo[i] + 1; j <= r.MaxInstanceNum[i]; j++ {
 			if r.IsCheckpoint(j) { // [*]Note: the first instance is also a checkpoint
 				continue
 			}
-
-			if instance[j] == nil {
-				continue
-			}
-
-			if instance[j].isTimeout() {
+			if instance[j] == nil || instance[j].isTimeout() {
 				r.MessageChan <- r.makeTimeout(uint8(i), j)
 			}
 		}
@@ -410,6 +406,8 @@ func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
 func (r *Replica) dispatch(msg message.Message) {
 	replicaId := msg.Replica()
 	instanceId := msg.Instance()
+
+	r.updateMaxInstanceNum(replicaId, instanceId)
 
 	v1Log.Infof("Replica[%v]: recv message[%s], from Replica[%v]\n",
 		r.Id, msg.String(), msg.Sender())
@@ -535,9 +533,10 @@ func (r *Replica) initInstance(cmds message.Commands, i *Instance) {
 	i.cmds, i.deps = cmds.Clone(), deps.Clone()
 	// we can only update here because
 	// now we are safe to have cmds, etc. inside instance
-	if !i.replica.updateMaxInstanceNum(i.rowId, i.id) {
-		panic("")
-	}
+	//if !i.replica.updateMaxInstanceNum(i.rowId, i.id) {
+	//	panic("")
+	//}
+	i.replica.updateMaxInstanceNum(i.rowId, i.id)
 }
 
 // This func updates the passed in dependencies from replica[from].
@@ -648,6 +647,7 @@ func (r *Replica) execute(i *Instance) error {
 	r.sccStack.Init()
 	r.sccResults = make([][]*Instance, 0)
 	r.sccIndex = 1
+
 	if ok := r.resolveConflicts(i); !ok {
 		return errConflictsNotFullyResolved
 	}
@@ -668,6 +668,11 @@ func (r *Replica) executeList() error {
 
 	// batch all commands in the scc
 	for _, sccNodes := range r.sccResults {
+		//for _, instance := range sccNodes {
+		//v2Log.Infof("Instance [%v][%v] executed\n", instance.rowId, instance.id)
+		//}
+		//v2Log.Infoln()
+
 		cmdsBuffer = cmdsBuffer[:0]
 		for _, instance := range sccNodes {
 			cmdsBuffer = append(cmdsBuffer, instance.cmds...)
@@ -680,7 +685,7 @@ func (r *Replica) executeList() error {
 		if err != nil {
 			return err
 		}
-		// TODO: transaction one SCC
+		// TODO: transaction one
 		for _, instance := range sccNodes {
 			instance.SetExecuted()
 		}
@@ -711,6 +716,7 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 
 		neighbor := r.InstanceMatrix[iSpace][dep]
 		if neighbor == nil || !neighbor.isAtStatus(committed) {
+			r.clearStack()
 			return false
 		}
 
@@ -720,14 +726,15 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 
 		if neighbor.sccIndex == 0 {
 			if ok := r.resolveConflicts(neighbor); !ok {
+				r.clearStack()
 				return false
 			}
 			if neighbor.sccLowlink < node.sccLowlink {
 				node.sccLowlink = neighbor.sccLowlink
 			}
 		} else if r.inSccStack(neighbor) {
-			if neighbor.sccIndex < node.sccLowlink {
-				node.sccLowlink = neighbor.sccIndex
+			if neighbor.sccLowlink < node.sccLowlink {
+				node.sccLowlink = neighbor.sccLowlink
 			}
 		}
 	}
@@ -937,4 +944,15 @@ func (r *Replica) RecoverFromPersistent() error {
 		}
 	}
 	return nil
+}
+
+func (r *Replica) clearStack() {
+	iter := r.sccStack.Front()
+	for iter != nil {
+		instance := iter.Value.(*Instance)
+		instance.sccIndex = 0
+		instance.sccLowlink = 0
+		iter = iter.Next()
+	}
+	r.sccStack.Init()
 }

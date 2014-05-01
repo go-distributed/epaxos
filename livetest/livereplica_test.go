@@ -67,7 +67,7 @@ func livetestlibSetupEasyTimeoutCluster(clusterSize int) []*replica.Replica {
 
 	for i := range nodes {
 		param := &replica.Param{
-			ExecuteInterval: time.Second * 50, // disable execution
+			ExecuteInterval: time.Second * 50,      // disable execution
 			TimeoutInterval: time.Millisecond * 20, // disable timeout
 			ReplicaId:       uint8(i),
 			Size:            uint8(clusterSize),
@@ -247,8 +247,8 @@ func Test3Replica3ProposerNoConflict(t *testing.T) {
 			go nodes[j].Propose(cmds...) // batching disabled
 		}
 	}
-	fmt.Println("Wait 5 Seconds for completion")
-	time.Sleep(5 * time.Second)
+	fmt.Println("Wait 10 Seconds for completion")
+	time.Sleep(10 * time.Second)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 }

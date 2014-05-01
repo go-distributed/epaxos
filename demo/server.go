@@ -26,7 +26,13 @@ type Voter struct {
 // NOTE: This is not idempotent.
 //      Same command might be executed for multiple times
 func (v *Voter) Execute(c []message.Command) ([]interface{}, error) {
-	fmt.Println(string(c[0]))
+	if c == nil || len(c) == 0 {
+		fmt.Println("No op")
+	} else {
+		for i := range c {
+			fmt.Println(string(c[i]))
+		}
+	}
 	return nil, nil
 }
 
@@ -67,6 +73,7 @@ func main() {
 		EnablePersistent: true,
 		Restore:          restore,
 		TimeoutInterval:  time.Second,
+		//ExecuteInterval:  time.Second,
 	}
 
 	fmt.Println("====== Spawn new replica ======")
@@ -85,10 +92,10 @@ func main() {
 	fmt.Println("====== start ======")
 
 	rand.Seed(time.Now().UTC().UnixNano())
-	counter := 0
+	counter := 1
 	for {
 		time.Sleep(time.Millisecond * 500)
-		c := "From: " + strconv.Itoa(id) + ", Command: " + strconv.Itoa(counter) + ", " + time.Now().String()
+		c := "From: " + strconv.Itoa(id) + ", Command: " + strconv.Itoa(id) + ":" + strconv.Itoa(counter) + ", " + time.Now().String()
 		counter++
 
 		cmds := make([]message.Command, 0)
