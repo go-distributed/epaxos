@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"time"
 
@@ -17,20 +18,20 @@ var _ = fmt.Printf
 
 const (
 	chars           = "ABCDEFG"
-	prepareInterval = 5 // 5 seconds
+	prepareInterval = 1 // 1 seconds
 )
 
-type Voter struct {
-}
+type Voter struct{}
 
 // NOTE: This is not idempotent.
 //      Same command might be executed for multiple times
+//      but the exection is slow now, so it is unlikely to happen
 func (v *Voter) Execute(c []message.Command) ([]interface{}, error) {
 	if c == nil || len(c) == 0 {
-		fmt.Println("No op")
+		fmt.Fprintln(os.Stderr, "No op")
 	} else {
 		for i := range c {
-			fmt.Println(string(c[i]))
+			fmt.Fprintln(os.Stderr, string(c[i]))
 		}
 	}
 	return nil, nil

@@ -27,11 +27,12 @@ import (
 )
 
 // #if test
-var v1Log = glog.V(0)
-var v2Log = glog.V(0)
+var v1Log = glog.V(2)
+var v2Log = glog.V(2)
 
 // #else
 // var v1Log = glog.V(1)
+// var v2Log = glog.V(2)
 // #end
 
 var (

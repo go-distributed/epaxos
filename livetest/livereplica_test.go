@@ -214,7 +214,7 @@ func liveTestlibVerifyDependency(r *replica.Replica, pos uint64) bool {
 // Test Scenario: Non-conflict commands, 1 proposer
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica1ProposerNoConflict(t *testing.T) {
-	maxInstance := 1024 * 4
+	maxInstance := 1024 * 2
 	allCmds := make([]message.Commands, maxInstance)
 
 	nodes := livetestlibSetupCluster(3)
@@ -236,7 +236,7 @@ func Test3Replica1ProposerNoConflict(t *testing.T) {
 // Expect: All replicas have same correct logs(cmds, deps) eventually
 func Test3Replica3ProposerNoConflict(t *testing.T) {
 	N := 3
-	maxInstance := 1024 * 4
+	maxInstance := 1024 * 2
 	nodes := livetestlibSetupCluster(N)
 	defer livetestlibStopCluster(nodes)
 
@@ -247,8 +247,8 @@ func Test3Replica3ProposerNoConflict(t *testing.T) {
 			go nodes[j].Propose(cmds...) // batching disabled
 		}
 	}
-	fmt.Println("Wait 10 Seconds for completion")
-	time.Sleep(10 * time.Second)
+	fmt.Println("Wait 5 Seconds for completion")
+	time.Sleep(5 * time.Second)
 
 	assert.True(t, livetestlibLogConsistent(t, nodes...))
 }
