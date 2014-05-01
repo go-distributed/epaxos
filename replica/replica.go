@@ -27,8 +27,8 @@ import (
 )
 
 // #if test
-var v1Log = glog.V(2)
-var v2Log = glog.V(2)
+var v1Log = glog.V(0)
+var v2Log = glog.V(0)
 
 // #else
 // var v1Log = glog.V(1)
@@ -619,7 +619,14 @@ func (r *Replica) findAndExecute() {
 			}
 
 			instance := r.InstanceMatrix[i][up]
-			if instance == nil || !instance.isAtStatus(committed) {
+
+			// [*] if the instance is nil, then we should not continue to execute,
+			// because this instance maybe already commited and executed by other
+			// replicas
+			if instance == nil {
+				break
+			}
+			if !instance.isAtStatus(committed) {
 				break
 			}
 			if instance.isExecuted() {
@@ -636,7 +643,6 @@ func (r *Replica) findAndExecute() {
 					break
 				default:
 					panic("unexpected error")
-
 				}
 			}
 		}
@@ -649,8 +655,9 @@ func (r *Replica) execute(i *Instance) error {
 	r.sccResults = make([][]*Instance, 0)
 	r.sccIndex = 1
 
+	v2Log.Infoln("start resolve")
 	if ok := r.resolveConflicts(i); !ok {
-		return errConflictsNotFullyResolved
+		v2Log.Infoln("there is incomplete scc")
 	}
 	// execute elements in the result list
 	// nodes of the list are in order that:
@@ -668,10 +675,13 @@ func (r *Replica) executeList() error {
 	cmdsBuffer := make([]message.Command, 0)
 
 	// batch all commands in the scc
+	v2Log.Infoln("execute list")
 	for _, sccNodes := range r.sccResults {
-		//for _, instance := range sccNodes {
-		//v2Log.Infof("Instance [%v][%v] executed\n", instance.rowId, instance.id)
-		//}
+		v2Log.Infoln("one scc")
+		for _, instance := range sccNodes {
+			v2Log.Infof("Instance [%v][%v] executed\n", instance.rowId, instance.id)
+		}
+		v2Log.Infoln("scc end")
 		//v2Log.Infoln()
 
 		cmdsBuffer = cmdsBuffer[:0]
@@ -700,6 +710,7 @@ func (r *Replica) executeList() error {
 // Assumption this function is based on:
 // - If a node is executed, all SCC it belongs to or depending has been executed.
 func (r *Replica) resolveConflicts(node *Instance) bool {
+	v2Log.Infof("resolve for [%v][%v]\n", node.rowId, node.id)
 	if node == nil || !node.isAtStatus(committed) {
 		panic("")
 	}
@@ -757,6 +768,7 @@ func (r *Replica) resolveConflicts(node *Instance) bool {
 }
 
 func (r *Replica) pushSccStack(i *Instance) {
+	v2Log.Infof("push stack [%v][%v]\n", i.rowId, i.id)
 	r.sccStack.PushBack(i)
 }
 
@@ -776,7 +788,20 @@ func (r *Replica) inSccStack(other *Instance) bool {
 func (r *Replica) popSccStack() *Instance {
 	res := r.sccStack.Back().Value.(*Instance)
 	r.sccStack.Remove(r.sccStack.Back())
+	v2Log.Infof("pop stack [%v][%v]\n", res.rowId, res.id)
 	return res
+}
+
+func (r *Replica) clearStack() {
+	iter := r.sccStack.Front()
+	for iter != nil {
+		instance := iter.Value.(*Instance)
+		v2Log.Infof("clear [%v][%v]\n", instance.rowId, instance.id)
+		instance.sccIndex = 0
+		instance.sccLowlink = 0
+		iter = iter.Next()
+	}
+	r.sccStack.Init()
 }
 
 // interfaces for sorting sccResult
@@ -945,15 +970,4 @@ func (r *Replica) RecoverFromPersistent() error {
 		}
 	}
 	return nil
-}
-
-func (r *Replica) clearStack() {
-	iter := r.sccStack.Front()
-	for iter != nil {
-		instance := iter.Value.(*Instance)
-		instance.sccIndex = 0
-		instance.sccLowlink = 0
-		iter = iter.Next()
-	}
-	r.sccStack.Init()
 }
