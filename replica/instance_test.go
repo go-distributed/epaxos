@@ -2789,7 +2789,7 @@ func TestMakeRecoveryDecision(t *testing.T) {
 
 	act, msg = i.makeRecoveryDecision()
 	assert.Equal(t, act, broadcastAction)
-	assert.Equal(t, msg, &message.Accept{
+	assert.Equal(t, msg, &message.PreAccept{
 		ReplicaId:  i.rowId,
 		InstanceId: i.id,
 		Cmds:       nil,
