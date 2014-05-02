@@ -103,6 +103,10 @@ kill ${replica[2]}
 echo "Test execution consistency..."
 echo
 
+grep "From:" log0 > log0From
+grep "From:" log1 > log1From
+grep "From:" log2 > log2From
+
 # check execution trace
 fail=0
 for i in 0 1 2
