@@ -583,6 +583,10 @@ func (r *Replica) scanConflicts(instances []*Instance, cmds message.Commands, st
 		if instances[i] == nil {
 			continue
 		}
+		// no-op conflicts with every other command
+		if cmds == nil {
+			return i
+		}
 		// we only need to find the highest instance in conflict
 		if r.StateMachine.HaveConflicts(cmds, instances[i].cmds) {
 			return i

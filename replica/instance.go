@@ -22,8 +22,9 @@ package replica
 // - The initial ballot is (epoch, 0, replicaId)
 // @decision (04/18/14):
 // - Delete rejections to avoid complexity
-// @TOTHINK:
-// send pre-accept or accept for no-op? Now we send accept for no-op
+// @fix:
+// send pre-accept for no-op, let it depend on every one before to maintain
+// the completeness of dependency graph
 
 import (
 	"fmt"
@@ -924,9 +925,9 @@ func (i *Instance) makeRecoveryDecision() (action uint8, msg message.Message) {
 			// TODO: action here?
 		}
 	case nilStatus:
-		// get ready to send Accept for No-op
-		i.enterAcceptedAsSender()
-		msg = i.makeAccept()
+		// get ready to send pre-accept for No-op
+		i.enterPreAcceptedAsSender()
+		msg = i.makePreAccept()
 	default:
 		panic(ir.status)
 	}
