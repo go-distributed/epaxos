@@ -116,7 +116,7 @@ Each module can be tested independently. Besides, in the core part, each state i
 
 ### What We Will Do
 
-* Exploit the paralism in EPaxos (Now the event dispatcher is single-threaded)
+* Exploit the parallelism in EPaxos (Now the event dispatcher is single-threaded)
 * Optimization on marshaling/unmarshaling
 * Add TCP transporter
 * Optimization on persistent module (Now the underlying storage is levelDB)
