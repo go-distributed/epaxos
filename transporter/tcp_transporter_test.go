@@ -2,13 +2,35 @@ package transporter
 
 import (
 	"net"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
+func runRecvServer(hostport string) <-chan struct{} {
+	ch := make(chan struct{})
+
+	go func() {
+		ln, err := net.Listen("tcp", hostport)
+		if err != nil {
+			panic("")
+		}
+
+		conn, err := ln.Accept()
+		if err != nil || conn == nil {
+			panic("")
+		}
+
+		conn.Close()
+		ln.Close()
+		close(ch)
+	}()
+
+	return ch
+}
+
+// This tests the functionality of NewTCPTransporter()
 func TestNewTCPTransporter(t *testing.T) {
 	tt, err := NewTCPTransporter(
 		[]string{"localhost:d", "localhost:8081", "localhost:8082"},
@@ -25,6 +47,7 @@ func TestNewTCPTransporter(t *testing.T) {
 	assert.NotNil(t, tt)
 }
 
+// This tests the dial() function
 func TestDial(t *testing.T) {
 	tt, err := NewTCPTransporter(
 		[]string{"localhost:8080", "localhost:8081", "localhost:8082"},
@@ -42,15 +65,11 @@ func TestDial(t *testing.T) {
 		assert.NotNil(t, tt.outConns[1])
 	}()
 
-	ln, err := net.Listen("tcp", ":8081")
-	assert.NoError(t, err)
-
-	conn, err := ln.Accept()
-	assert.NoError(t, err)
-	assert.NotNil(t, conn)
-	ln.Close()
+	done := runRecvServer(":8081")
+	<-done
 }
 
+// This tests the failure handling functionality of the dialLoop()
 func TestDialLoopFail(t *testing.T) {
 	tt, err := NewTCPTransporter(
 		[]string{"localhost:8080", "localhost:8081", "localhost:8082"},
@@ -59,36 +78,17 @@ func TestDialLoopFail(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 1, no connections
-	dialDone := make(chan struct{})
-	errChan := make(chan error, 1)
-	tt.dialLoop(dialDone, errChan)
-	<-dialDone
-	assert.Error(t, <-errChan)
+	assert.Error(t, tt.dialLoop())
 
 	// 2, only one connection
-	ok := make(chan struct{})
-	go func(ok chan struct{}) {
-		ln, err := net.Listen("tcp", ":8081")
-		assert.NoError(t, err)
-
-		conn, err := ln.Accept()
-		assert.NoError(t, err)
-		assert.NotNil(t, conn)
-		ln.Close()
-		close(ok)
-	}(ok)
-
-	dialDone = make(chan struct{})
-	errChan = make(chan error, 1)
-	tt.dialLoop(dialDone, errChan)
-	<-dialDone
-	assert.Error(t, <-errChan)
-	<-ok
-
+	done := runRecvServer(":8081")
+	assert.Error(t, tt.dialLoop())
+	<-done
 	assert.NotNil(t, tt.outConns[1])
 
 }
 
+// This tests the successful behaviour of the dialLoop
 func TestDialLoopSucceed(t *testing.T) {
 	tt, err := NewTCPTransporter(
 		[]string{"localhost:8080", "localhost:8081", "localhost:8082"},
@@ -96,42 +96,50 @@ func TestDialLoopSucceed(t *testing.T) {
 		3)
 	assert.NoError(t, err)
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	done1 := runRecvServer(":8081")
+	done2 := runRecvServer(":8082")
 
-	go func() {
-		ln, err := net.Listen("tcp", ":8081")
-		assert.NoError(t, err)
-
-		conn, err := ln.Accept()
-		assert.NoError(t, err)
-		assert.NotNil(t, conn)
-
-		ln.Close()
-		wg.Done()
-	}()
-
-	go func() {
-		ln, err := net.Listen("tcp", ":8082")
-		assert.NoError(t, err)
-
-		conn, err := ln.Accept()
-		assert.NoError(t, err)
-		assert.NotNil(t, conn)
-
-		ln.Close()
-		wg.Done()
-	}()
-
-	dialDone := make(chan struct{})
-	errChan := make(chan error, 1)
-	tt.dialLoop(dialDone, errChan)
-	<-dialDone
-	assert.Equal(t, len(errChan), 0)
-	wg.Wait()
-
+	assert.NoError(t, tt.dialLoop())
+	<-done1
+	<-done2
 	assert.NotNil(t, tt.outConns[1])
 	assert.NotNil(t, tt.outConns[2])
 }
 
-// TODO:: test run
+// This tests the Send() function, if a send fails, it should try to
+// reconnect by calling the dial()
+// Note: Now it is the non-marshaler version
+func TestSend(t *testing.T) {
+	tt, err := NewTCPTransporter(
+		[]string{"localhost:8080", "localhost:8081", "localhost:8082"},
+		0,
+		3)
+	assert.NoError(t, err)
+
+	done1 := runRecvServer(":8081")
+	done2 := runRecvServer(":8082")
+
+	assert.NoError(t, tt.dialLoop())
+
+	<-done1
+	<-done2
+
+	origConn := tt.outConns[1]
+
+	tt.outConns[1].SetWriteDeadline(time.Now())
+	tt.Send(1, nil) // send fail and dial should fail
+	time.Sleep(time.Microsecond * 500)
+	assert.Equal(t, origConn, tt.outConns[1])
+
+	done2 = runRecvServer(":8081")
+	time.Sleep(time.Millisecond * 500)
+	tt.Send(1, nil) // this time should fail at first, and then dial successfully
+	time.Sleep(time.Millisecond * 500)
+
+	assert.NotEqual(t, origConn, tt.outConns[1])
+}
+
+// TODO: test run()
+func TestRun(t *testing.T) {
+	
+}

@@ -18,47 +18,45 @@ const defaultRetryDuration = 50 * time.Millisecond
 const defaultRetrial = 5
 
 type TCPTransporter struct {
-	ids         []uint8
-	addrStrings map[uint8]string
-	tcpAddrs    map[uint8]*net.TCPAddr
-	self        uint8
-	fastQuorum  int
-	all         int
+	ids        []uint8
+	tcpAddrs   map[uint8]*net.TCPAddr
+	self       uint8
+	fastQuorum int
+	all        int
 
 	ln       *net.TCPListener
 	inConns  map[uint8]*net.TCPConn
 	outConns map[uint8]*net.TCPConn
 
-	ch   chan message.Message
-	stop chan struct{}
+	replicaCh chan message.Message
+	stop      chan struct{}
 }
 
 func NewTCPTransporter(addrStrs []string, self uint8, size int) (*TCPTransporter, error) {
 	tt := &TCPTransporter{
-		ids:         make([]uint8, size),
-		addrStrings: make(map[uint8]string),
-		tcpAddrs:    make(map[uint8]*net.TCPAddr),
-		self:        self,
-		fastQuorum:  size - 2,
-		all:         size,
+		ids:        make([]uint8, size),
+		tcpAddrs:   make(map[uint8]*net.TCPAddr),
+		self:       self,
+		fastQuorum: size - 2,
+		all:        size,
 
 		inConns:  make(map[uint8]*net.TCPConn),
 		outConns: make(map[uint8]*net.TCPConn),
 
-		ch:   make(chan message.Message), // TODO: more buffer size
-		stop: make(chan struct{}),
+		replicaCh: make(chan message.Message), // TODO: more buffer size
+		stop:      make(chan struct{}),
 	}
 
 	for i := 0; i < size; i++ {
 		tt.ids[i] = uint8(i)
 	}
-	for i := range addrStrs {
-		tt.addrStrings[uint8(i)] = addrStrs[i]
-	}
 
 	// resolve tcp addrs
-	for id, addrStr := range tt.addrStrings {
-		var err error
+	var err error
+	for i := range addrStrs {
+		id := tt.ids[i]
+		addrStr := addrStrs[i]
+
 		tt.tcpAddrs[id], err = net.ResolveTCPAddr("tcp", addrStr)
 		if err != nil {
 			glog.Warning("ResolveTCPAddr error: ", err)
@@ -69,7 +67,7 @@ func NewTCPTransporter(addrStrs []string, self uint8, size int) (*TCPTransporter
 }
 
 func (tt *TCPTransporter) RegisterChannel(ch chan message.Message) {
-	tt.ch = ch
+	tt.replicaCh = ch
 }
 
 func (tt *TCPTransporter) Send(to uint8, msg message.Message) {
@@ -108,7 +106,7 @@ func (tt *TCPTransporter) dial(id uint8) error {
 }
 
 // try to establish outgoing connetions with other peers
-func (tt *TCPTransporter) dialLoop(dialDone chan struct{}, errChan chan error) {
+func (tt *TCPTransporter) dialLoop() error {
 	success := false
 
 	for i := 0; i < defaultRetrial; i++ {
@@ -135,21 +133,21 @@ func (tt *TCPTransporter) dialLoop(dialDone chan struct{}, errChan chan error) {
 	}
 
 	if !success {
-		errChan <- errCannotEstablishConnetions
+		return errCannotEstablishConnetions
 	}
-	close(dialDone)
+	return nil
 }
 
-func (tt *TCPTransporter) findIdByAddr(addr net.Addr) uint8 {
+func (tt *TCPTransporter) findIDByAddr(addr net.Addr) uint8 {
 	host, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
 		panic("SplitHostPort error, which is impossible here")
 	}
 
 	// just iterate to find the id is ok since the quorum is small
-	// and findIdByAddr() is rarely called
-	for id, addrStr := range tt.addrStrings {
-		ihost, _, err := net.SplitHostPort(addrStr)
+	// and findIDByAddr() is rarely called
+	for id, addr := range tt.tcpAddrs {
+		ihost, _, err := net.SplitHostPort(addr.String())
 		if err != nil {
 			panic("SplitHostPort error, which is impossible here")
 		}
@@ -186,7 +184,7 @@ func (tt *TCPTransporter) run() {
 			continue
 		}
 
-		id := tt.findIdByAddr(conn.RemoteAddr())
+		id := tt.findIDByAddr(conn.RemoteAddr())
 		tt.inConns[id] = conn
 		go tt.readLoop(conn)
 	}
@@ -219,14 +217,8 @@ func (tt *TCPTransporter) readLoop(conn *net.TCPConn) {
 }
 
 func (tt *TCPTransporter) Start() error {
-	dialDone := make(chan struct{})
-	errChan := make(chan error, 2)
-
 	// start dial loop, wait for all outgoing connections
-	go tt.dialLoop(dialDone, errChan)
-
-	<-dialDone
-	if err := <-errChan; err != nil {
+	if err := tt.dialLoop(); err != nil {
 		return err
 	}
 
