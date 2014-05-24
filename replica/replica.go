@@ -205,7 +205,6 @@ func New(param *Param) (*Replica, error) {
 
 		executeTicker: time.NewTicker(param.ExecuteInterval),
 		timeoutTicker: time.NewTicker(param.TimeoutInterval),
-		proposeTicker: time.NewTicker(param.BatchInterval),
 
 		executeTrigger:   make(chan bool),
 		stop:             make(chan struct{}),
@@ -243,9 +242,8 @@ func New(param *Param) (*Replica, error) {
 
 	r.Transporter.RegisterChannel(r.MessageChan)
 
-	if !r.enableBatching {
-		// stop ticker
-		r.proposeTicker.Stop()
+	if r.enableBatching {
+		r.proposeTicker = time.NewTicker(param.BatchInterval)
 	}
 
 	return r, nil
@@ -336,19 +334,36 @@ func (r *Replica) executeLoop() {
 }
 
 func (r *Replica) proposeLoop() {
-	bufferedRequests := make([]*proposeRequest, 0) // start from 0
+	if r.enableBatching {
+		r.proposeLoopWithBatching()
+	} else {
+		r.proposeLoopWithoutBatching()
+	}
+}
 
+func (r *Replica) proposeLoopWithBatching() {
+	bufferedRequests := make([]*proposeRequest, 0) // start from 0
 	for {
 		select {
 		case <-r.stop:
 			return
 		case req := <-r.ProposeChan:
 			bufferedRequests = append(bufferedRequests, req)
-			if !r.enableBatching {
-				r.BatchPropose(&bufferedRequests)
-			}
 		case <-r.proposeTicker.C:
-			r.BatchPropose(&bufferedRequests)
+			r.batchPropose(&bufferedRequests)
+		}
+	}
+}
+
+func (r *Replica) proposeLoopWithoutBatching() {
+	bufferedRequests := make([]*proposeRequest, 0) // start from 0
+	for {
+		select {
+		case <-r.stop:
+			return
+		case req := <-r.ProposeChan:
+			bufferedRequests = append(bufferedRequests, req)
+			r.batchPropose(&bufferedRequests)
 		}
 	}
 }
@@ -361,7 +376,7 @@ func (r *Replica) Propose(cmds ...message.Command) chan uint64 {
 }
 
 // TODO: This must be done in a synchronized/atomic way.
-func (r *Replica) BatchPropose(batchedRequests *[]*proposeRequest) {
+func (r *Replica) batchPropose(batchedRequests *[]*proposeRequest) {
 	defer func() { *batchedRequests = (*batchedRequests)[:0] }() // resize
 
 	br := *batchedRequests
