@@ -30,7 +30,7 @@ func runRecvServer(hostport string) <-chan struct{} {
 	return ch
 }
 
-// This tests the functionality of NewTCPTransporter()
+// This tests the functionality of NewTCPTransporter().
 func TestNewTCPTransporter(t *testing.T) {
 	tt, err := NewTCPTransporter(
 		[]string{"localhost:d", "localhost:8081", "localhost:8082"},
@@ -43,8 +43,9 @@ func TestNewTCPTransporter(t *testing.T) {
 		[]string{"localhost:8080", "localhost:8081", "localhost:8082"},
 		0,
 		3)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, tt)
+	tt.Stop()
 }
 
 // This tests the dial() function
@@ -67,6 +68,7 @@ func TestDial(t *testing.T) {
 
 	done := runRecvServer(":8081")
 	<-done
+	tt.Stop()
 }
 
 // This tests the failure handling functionality of the dialLoop()
@@ -85,7 +87,7 @@ func TestDialLoopFail(t *testing.T) {
 	assert.Error(t, tt.dialLoop())
 	<-done
 	assert.NotNil(t, tt.outConns[1])
-
+	tt.Stop()
 }
 
 // This tests the successful behaviour of the dialLoop
@@ -104,6 +106,7 @@ func TestDialLoopSucceed(t *testing.T) {
 	<-done2
 	assert.NotNil(t, tt.outConns[1])
 	assert.NotNil(t, tt.outConns[2])
+	tt.Stop()
 }
 
 // This tests the Send() function, if a send fails, it should try to
@@ -127,19 +130,82 @@ func TestSend(t *testing.T) {
 	origConn := tt.outConns[1]
 
 	tt.outConns[1].SetWriteDeadline(time.Now())
-	tt.Send(1, nil) // send fail and dial should fail
+	go tt.outgoingLoop()
+	tt.Send(1, nil) // Send fail and dial should fail
 	time.Sleep(time.Microsecond * 500)
 	assert.Equal(t, origConn, tt.outConns[1])
 
 	done2 = runRecvServer(":8081")
 	time.Sleep(time.Millisecond * 500)
-	tt.Send(1, nil) // this time should fail at first, and then dial successfully
+	tt.Send(1, nil) // This time should fail at first, and then dial successfully.
 	time.Sleep(time.Millisecond * 500)
 
 	assert.NotEqual(t, origConn, tt.outConns[1])
+	<-done2
+	tt.Stop()
 }
 
-// TODO: test run()
-func TestRun(t *testing.T) {
-	
+// This tests the functionality of findIDByAddr
+func TestFindIDByAddr(t *testing.T) {
+	tt, err := NewTCPTransporter(
+		[]string{"localhost:8080", "localhost:8081", "localhost:8082"},
+		0,
+		3)
+	assert.NoError(t, err)
+
+	addr, err := net.ResolveTCPAddr("tcp", "localhost:8080")
+	assert.NoError(t, err)
+	id, ok := tt.findIDByAddr(addr)
+	assert.True(t, ok)
+	assert.Equal(t, id, uint8(0))
+
+	addr, err = net.ResolveTCPAddr("tcp", "localhost:8081")
+	assert.NoError(t, err)
+	id, ok = tt.findIDByAddr(addr)
+	assert.True(t, ok)
+	assert.Equal(t, id, uint8(1))
+
+	addr, err = net.ResolveTCPAddr("tcp", "localhost:8082")
+	assert.NoError(t, err)
+	id, ok = tt.findIDByAddr(addr)
+	assert.True(t, ok)
+	assert.Equal(t, id, uint8(2))
+
+	addr, err = net.ResolveTCPAddr("tcp", "localhost:8083")
+	assert.NoError(t, err)
+	id, ok = tt.findIDByAddr(addr)
+	assert.False(t, ok)
+	assert.Equal(t, id, uint8(0))
+
+	tt.Stop()
 }
+
+//// This tests the functionality of run().
+//func TestRun(t *testing.T) {
+//	tt, err := NewTCPTransporter(
+//		[]string{"localhost:8080", "localhost:8081", "localhost:8082"},
+//		0,
+//		3)
+//	assert.NoError(t, err)
+//
+//	go tt.run()
+//
+//	time.Sleep(time.Millisecond * 500)
+//
+//	localAddr, err := net.ResolveTCPAddr("tcp", "localhost:8081")
+//	assert.NoError(t, err)
+//
+//	remoteAddr, err := net.ResolveTCPAddr("tcp", "localhost:8080")
+//	assert.NoError(t, err)
+//
+//	conn, err := net.DialTCP("tcp", localAddr, remoteAddr)
+//
+//	time.Sleep(time.Millisecond * 500)
+//
+//	assert.NoError(t, err)
+//	assert.NotNil(t, conn)
+//
+//	assert.NotNil(t, tt.inConns[1])
+//	conn.Close()
+//	tt.Stop()
+//}

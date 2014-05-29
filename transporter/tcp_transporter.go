@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/go-distributed/epaxos/message"
@@ -16,6 +17,7 @@ var errCannotEstablishConnetions = errors.New("tcp_transporter: cannot establish
 
 const defaultRetryDuration = 50 * time.Millisecond
 const defaultRetrial = 5
+const defaultReconnectChanSize = 1024
 
 type TCPTransporter struct {
 	ids        []uint8
@@ -24,12 +26,17 @@ type TCPTransporter struct {
 	fastQuorum int
 	all        int
 
-	ln       *net.TCPListener
-	inConns  map[uint8]*net.TCPConn
-	outConns map[uint8]*net.TCPConn
+	ln            *net.TCPListener
+	inConns       map[uint8]*net.TCPConn
+	outConns      map[uint8]*net.TCPConn
+	outConnStates map[uint8]bool
+	outConnRW     sync.RWMutex
 
-	replicaCh chan message.Message
-	stop      chan struct{}
+	reconnectCh chan uint8
+	replicaCh   chan message.Message
+	stop        chan struct{}
+
+	//codec codec.Codec
 }
 
 func NewTCPTransporter(addrStrs []string, self uint8, size int) (*TCPTransporter, error) {
@@ -40,18 +47,19 @@ func NewTCPTransporter(addrStrs []string, self uint8, size int) (*TCPTransporter
 		fastQuorum: size - 2,
 		all:        size,
 
-		inConns:  make(map[uint8]*net.TCPConn),
-		outConns: make(map[uint8]*net.TCPConn),
+		inConns:       make(map[uint8]*net.TCPConn),
+		outConns:      make(map[uint8]*net.TCPConn),
+		outConnStates: make(map[uint8]bool),
 
-		replicaCh: make(chan message.Message), // TODO: more buffer size
-		stop:      make(chan struct{}),
+		reconnectCh: make(chan uint8, defaultReconnectChanSize),
+		replicaCh:   make(chan message.Message), // TODO: more buffer size.
+		stop:        make(chan struct{}),
 	}
-
 	for i := 0; i < size; i++ {
 		tt.ids[i] = uint8(i)
 	}
 
-	// resolve tcp addrs
+	// Resolve tcp addresses.
 	var err error
 	for i := range addrStrs {
 		id := tt.ids[i]
@@ -72,16 +80,22 @@ func (tt *TCPTransporter) RegisterChannel(ch chan message.Message) {
 
 func (tt *TCPTransporter) Send(to uint8, msg message.Message) {
 	go func() {
-		// TODO: marshal
+		// TODO: marshal.
 		conn := tt.outConns[to]
 		_, err := conn.Write([]byte("something"))
 		if err != nil {
 			// TODO: connection lost error?
 			remoteAddr := conn.RemoteAddr()
-			glog.Warning("Write error from connection: ", remoteAddr, err)
+			glog.Warning("Write error from connection: ",
+				remoteAddr, err)
 
-			// try to reconnect
-			tt.dial(to)
+			tt.outConnRW.Lock()
+			defer tt.outConnRW.Unlock()
+
+			// Close the connection and invalidate its state.
+			tt.outConns[to].Close()
+			tt.outConnStates[to] = false
+			tt.reconnectCh <- to
 		}
 	}()
 }
@@ -92,9 +106,19 @@ func (tt *TCPTransporter) MulticastFastquorum(msg message.Message) {
 func (tt *TCPTransporter) Broadcast(msg message.Message) {
 }
 
-// try to estable a tcp connetion with a remote address,
-// and then save the connection in the map
+// Try to estable a tcp connetion with a remote address,
+// and then save the connection in the map.
 func (tt *TCPTransporter) dial(id uint8) error {
+	tt.outConnRW.Lock()
+	defer tt.outConnRW.Unlock()
+
+	// Return immediately if the connection is valid, which means
+	// that the connection is probably reconstructed successfully
+	// some time before.
+	if tt.outConnStates[id] == true {
+		return nil
+	}
+	// Otherwise, try to reconnect.
 	addr := tt.tcpAddrs[id]
 	conn, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
@@ -102,10 +126,11 @@ func (tt *TCPTransporter) dial(id uint8) error {
 		return err
 	}
 	tt.outConns[id] = conn
+	tt.outConnStates[id] = true
 	return nil
 }
 
-// try to establish outgoing connetions with other peers
+// Try to establish outgoing connetions with other peers.
 func (tt *TCPTransporter) dialLoop() error {
 	success := false
 
@@ -115,20 +140,21 @@ func (tt *TCPTransporter) dialLoop() error {
 			if id == tt.self {
 				continue
 			}
-			if tt.outConns[id] != nil { // skip already established connections
+			// Skip already established connections.
+			if tt.outConns[id] != nil {
 				continue
 			}
 			if err := tt.dial(id); err != nil {
+				glog.Info("Dial error ", err)
 				continue
 			}
 		}
-
-		// test if all outgoing connections are established
+		// Test if all outgoing connections are established.
 		if len(tt.outConns) >= tt.all-1 {
 			success = true
 			break
 		}
-		glog.Infof("Will retry after %d seconds\n", defaultRetryDuration/1000000000)
+		glog.Warning("Will retry after ", defaultRetryDuration.String())
 		time.Sleep(defaultRetryDuration)
 	}
 
@@ -138,30 +164,46 @@ func (tt *TCPTransporter) dialLoop() error {
 	return nil
 }
 
-func (tt *TCPTransporter) findIDByAddr(addr net.Addr) uint8 {
-	host, _, err := net.SplitHostPort(addr.String())
+// Will monitor and try to reconnect any disconnected outgoing connections.
+func (tt *TCPTransporter) outgoingLoop() {
+	for {
+		select {
+		case <-tt.stop:
+			return
+		case to := <-tt.reconnectCh:
+			tt.dial(to)
+		}
+	}
+}
+
+// Return false if not found, otherwise return true with
+// the replica-id of the incoming connection.
+func (tt *TCPTransporter) findIDByAddr(addr net.Addr) (uint8, bool) {
+	host, port, err := net.SplitHostPort(addr.String())
 	if err != nil {
 		panic("SplitHostPort error, which is impossible here")
 	}
 
-	// just iterate to find the id is ok since the quorum is small
-	// and findIDByAddr() is rarely called
+	// Just iterate to find the id is ok since the quorum is small
+	// and findIDByAddr() is rarely called.
 	for id, addr := range tt.tcpAddrs {
-		ihost, _, err := net.SplitHostPort(addr.String())
+		ihost, iport, err := net.SplitHostPort(addr.String())
 		if err != nil {
 			panic("SplitHostPort error, which is impossible here")
 		}
-		if host == ihost { // found
-			return id
+
+		if host == ihost && iport == port { // Found
+			return id, true
 		}
 	}
+
 	glog.Warning("invalid remote addr: ", addr)
-	panic("")
+	return 0, false
 }
 
-// start listen and then keeping accepting new connections,
-// once a new connection is established, start a goroutine to read it
-func (tt *TCPTransporter) run() {
+// Start listen and then keep accepting new connections,
+// for each newly established connection, start a goroutine to read it.
+func (tt *TCPTransporter) incomingLoop() {
 	var err error
 
 	tt.ln, err = net.ListenTCP("tcp", tt.tcpAddrs[tt.self])
@@ -170,7 +212,7 @@ func (tt *TCPTransporter) run() {
 		return
 	}
 
-	// keep accepting connections
+	// Keep accepting connections.
 	for {
 		select {
 		case <-tt.stop:
@@ -184,14 +226,16 @@ func (tt *TCPTransporter) run() {
 			continue
 		}
 
-		id := tt.findIDByAddr(conn.RemoteAddr())
-		tt.inConns[id] = conn
-		go tt.readLoop(conn)
+		id, ok := tt.findIDByAddr(conn.RemoteAddr())
+		if ok {
+			tt.inConns[id] = conn
+			go tt.readLoop(conn)
+		}
 	}
 }
 
-// keep reading from one incoming connection,
-// if the connection gets lost, then return
+// Keep reading from one incoming connection,
+// if the connection gets lost, then return.
 func (tt *TCPTransporter) readLoop(conn *net.TCPConn) {
 	for {
 		select {
@@ -200,32 +244,42 @@ func (tt *TCPTransporter) readLoop(conn *net.TCPConn) {
 		default:
 		}
 
-		for {
-			var b []byte
-			_, err := conn.Read(b)
-			if err != nil {
-				// TODO: to detect connection lost error
-				remoteAddr := conn.RemoteAddr()
-				glog.Warning("Read error from connection: ", remoteAddr, err)
-				return
-			}
-
-			// TODO: unmarshal and send to channel
-			fmt.Println(b)
+		var b []byte
+		_, err := conn.Read(b)
+		if err != nil {
+			// TODO: To detect connection lost error.
+			remoteAddr := conn.RemoteAddr()
+			glog.Warning("Read error from connection: ",
+				remoteAddr, err)
+			conn.Close()
+			return
 		}
+
+		// TODO: Unmarshal and send to channel.
+		fmt.Println(b)
 	}
 }
 
+// Start the TCP transporter
 func (tt *TCPTransporter) Start() error {
-	// start dial loop, wait for all outgoing connections
+	// Start dial loop, wait for all outgoing connections.
 	if err := tt.dialLoop(); err != nil {
 		return err
 	}
-
-	// start accept and read loop
-	go tt.run()
+	// Start accept and read loop.
+	go tt.incomingLoop()
+	go tt.outgoingLoop()
 	return nil
 }
 
+// Stop the TCP transporter
 func (tt *TCPTransporter) Stop() {
+	close(tt.stop)
+	tt.ln.Close()
+	for i := range tt.inConns {
+		tt.inConns[i].Close()
+	}
+	for i := range tt.outConns {
+		tt.outConns[i].Close()
+	}
 }
