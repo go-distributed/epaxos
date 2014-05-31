@@ -1,0 +1,97 @@
+package protobuf;
+
+import "code.google.com/p/gogoprotobuf/gogoproto/gogo.proto";
+
+option (gogoproto.gostring_all) = true;
+option (gogoproto.equal_all) = true;
+option (gogoproto.verbose_equal_all) = true;
+option (gogoproto.goproto_stringer_all) = false;
+option (gogoproto.stringer_all) =  true;
+option (gogoproto.populate_all) = true;
+option (gogoproto.testgen_all) = true;
+option (gogoproto.benchgen_all) = true;
+option (gogoproto.marshaler_all) = true;
+option (gogoproto.sizer_all) = true;
+option (gogoproto.unmarshaler_all) = true;
+
+// Nested fields.
+message Ballot {
+        required uint32 Epoch = 1; // TODO: Change to uint64.
+        required uint64 Number = 2;
+        required uint32 ReplicaID= 3; // TODO: Change to UUID.
+}
+
+enum State {
+        NilStatus = 1;
+        Preparing = 2;
+        PreAccepted = 3;
+        Accepted = 4;
+        Committed = 5;
+}
+
+// EPaxos messages.
+message PreAccept {
+        required uint32 ReplicaID = 1;
+        required uint64 InstanceID = 2;
+        repeated bytes Cmds = 3;
+        repeated uint64 Deps = 4;
+        required Ballot Ballot = 5;
+        required uint32 From = 6;
+}
+
+message PreAcceptOK {
+        required uint32 ReplicaID = 1;
+        required uint64 InstanceID = 2;
+        required uint32 From = 3;
+}
+
+message PreAcceptReply {
+        required uint32 ReplicaID = 1;
+        required uint64 InstanceID = 2;
+        repeated uint64 Deps = 3;
+        required Ballot Ballot = 4;
+        required uint32 From = 5;
+}
+
+message Accept {
+        required uint32 ReplicaID = 1;
+        required uint64 InstanceID = 2;
+        repeated bytes Cmds = 3;
+        repeated uint64 Deps = 4;
+        required Ballot Ballot = 5;
+        required uint32 From = 6;
+}
+
+message AcceptReply {
+        required uint32 ReplicaID = 1;
+        required uint64 InstanceID = 2;
+        required Ballot Ballot = 3;
+        required uint32 From = 4;
+}
+
+message Prepare {
+        required uint32 ReplicaID = 1;
+        required uint64 InstanceID = 2;
+        required Ballot Ballot = 3;
+        required uint32 From = 4;
+}
+
+message PrepareReply {
+        required uint32 ReplicaID = 1;
+        required uint64 InstanceID = 2;
+        required State State = 3;
+        repeated bytes Cmds = 4;
+        repeated uint64 Deps = 5;
+        required Ballot Ballot = 6;
+        required Ballot OriginalBallot = 7;
+        required bool IsFromLeader = 8;
+        required uint32 From = 9;
+}
+
+message Commit {
+        required uint32 ReplicaID = 1;
+        required uint64 InstancdID = 2;
+        repeated bytes Cmds = 3;
+        repeated uint64 Deps = 4;
+        required uint32 From = 5;
+}
