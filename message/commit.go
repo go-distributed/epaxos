@@ -2,6 +2,9 @@ package message
 
 import (
 	"fmt"
+
+	"github.com/go-distributed/epaxos/protobuf"
+	"github.com/golang/glog"
 )
 
 type Commit struct {
@@ -10,6 +13,7 @@ type Commit struct {
 	Cmds       Commands
 	Deps       Dependencies
 	From       uint8
+	pb         protobuf.Commit // for protobuf
 }
 
 func (c *Commit) Sender() uint8 {
@@ -34,4 +38,37 @@ func (c *Commit) Instance() uint64 {
 
 func (c *Commit) String() string {
 	return fmt.Sprintf("Commit, Instance[%v][%v]", c.ReplicaId, c.InstanceId)
+}
+
+func (c *Commit) MarshalProtobuf() ([]byte, error) {
+	replicaID := uint32(c.ReplicaId)
+	instanceID := uint64(c.InstanceId)
+	from := uint32(c.From)
+
+	c.pb.ReplicaID = &replicaID
+	c.pb.InstanceID = &instanceID
+	c.pb.Cmds = c.Cmds.ToBytesSlice()
+	c.pb.Deps = c.Deps
+	c.pb.From = &from
+
+	data, err := c.pb.Marshal()
+	if err != nil {
+		glog.Warning("Commit: MarshalProtobuf() error: ", err)
+		return nil, err
+	}
+	return data, nil
+}
+
+func (c *Commit) UnmarshalProtobuf(data []byte) error {
+	if err := c.pb.Unmarshal(data); err != nil {
+		glog.Warning("Commit: UnmarshalProtobuf() error: ", err)
+		return err
+	}
+
+	c.ReplicaId = uint8(c.pb.GetReplicaID())
+	c.InstanceId = uint64(c.pb.GetInstanceID())
+	c.Cmds.FromBytesSlice(c.pb.GetCmds())
+	c.Deps = c.pb.GetDeps()
+	c.From = uint8(c.pb.GetFrom())
+	return nil
 }

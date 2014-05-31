@@ -130,3 +130,20 @@ func TestBallotSetNumber(t *testing.T) {
 	b.SetNumber(4)
 	assert.Equal(t, b.GetNumber(), uint64(4))
 }
+
+func TestToProtobuf(t *testing.T) {
+	b := NewBallot(1, 2, 3)
+	pb := b.ToProtobuf()
+	assert.Equal(t, *pb.Epoch, uint32(1))
+	assert.Equal(t, *pb.Number, uint64(2))
+	assert.Equal(t, *pb.ReplicaID, uint8(3))
+}
+
+func TestFromProtobuf(t *testing.T) {
+	b := NewBallot(1, 2, 3)
+	pb := b.ToProtobuf()
+
+	var bb Ballot
+	bb.FromProtobuf(pb)
+	assert.Equal(t, *b, bb)
+}
