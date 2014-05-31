@@ -33,3 +33,11 @@ func (t *Timeout) Instance() uint64 {
 func (t *Timeout) String() string {
 	return fmt.Sprintf("Timeout, Instance[%v][%v]", t.ReplicaId, t.InstanceId)
 }
+
+func (t *Timeout) MarshalBinary() ([]byte, error) {
+	return nil, fmt.Errorf("Timeout: MarshalBinary() not implemented\n")
+}
+
+func (t *Timeout) UnmarshalBinary([]byte) error {
+	return fmt.Errorf("Timeout: UnmarshalBinary() not implemented\n")
+}

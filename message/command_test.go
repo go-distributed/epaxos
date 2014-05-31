@@ -37,3 +37,25 @@ func TestCommandClone(t *testing.T) {
 		assert.ObjectsAreEqual(manyCmds.Clone(), manyCmds),
 	)
 }
+
+func TestCommandsToBytesSlice(t *testing.T) {
+	manyCmds := Commands{
+		Command("1"),
+		Command("2"),
+	}
+
+	b := manyCmds.ToBytesSlice()
+	assert.Equal(t, b, [][]byte{[]byte("1"), []byte("2")})
+}
+
+func TestBytesSliceToCommands(t *testing.T) {
+	b := [][]byte{[]byte("1"), []byte("2")}
+
+	var cmds Commands
+	cmds.FromBytesSlice(b)
+	expectedCmds := Commands{
+		Command("1"),
+		Command("2"),
+	}
+	assert.Equal(t, cmds, expectedCmds)
+}

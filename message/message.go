@@ -7,6 +7,8 @@ type Message interface {
 	Replica() uint8
 	Instance() uint64
 	String() string
+	MarshalBinary() ([]byte, error)
+	UnmarshalBinary([]byte) error
 }
 
 func MessageTypeString(m Message) string {
