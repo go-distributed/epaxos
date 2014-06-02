@@ -516,6 +516,10 @@ func (r *Replica) quorum() int {
 	return int(r.Size / 2)
 }
 
+func (r *Replica) F() int {
+	return int(r.Size / 2)
+}
+
 func (r *Replica) makeInitialBallot() *message.Ballot {
 	return message.NewBallot(r.Epoch, 0, r.Id)
 }
