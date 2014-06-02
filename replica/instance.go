@@ -1,6 +1,8 @@
 package replica
 
 // This file implements instance module.
+//
+// We are listing here the assumptions made in our implementaion.
 // @assumption:
 // - When a replica pass in the message to instance methods, we assume that the
 //   internal fields of message is readable only and safe to reference to, except deps.
@@ -22,9 +24,6 @@ package replica
 // - The initial ballot is (epoch, 0, replicaId)
 // @decision (04/18/14):
 // - Delete rejections to avoid complexity
-// @fix:
-// send pre-accept for no-op, let it depend on every one before to maintain
-// the completeness of dependency graph
 
 import (
 	"fmt"
@@ -899,6 +898,26 @@ func (i *Instance) loadRecoveryInfo() {
 	}
 }
 
+// This function is the end of recovery phase and the instance have
+// enough knowledge to broadcast messages to peers of his decision.
+//
+// One important aspect in EPaxos recovery phase is that it needs to
+// take care of what's left on previous fast path made by default leader.
+// Here are the details not covered in the paper:
+//
+// If the instance had received at least F identical preaccepted replies
+// from non-leader replicas, we couldn't tell whether the default leader had chosen
+// fast path or not. At this point, the instance should go to PAXOS-ACCEPT phase.
+// And it is guaranteed safety:
+// 1. if default leader hadn't gone to fast path, because (1) the instance had
+//    prepared a quorum of peers, the final commit message wouldn't take outdated,
+//    previous ones; and (2) including the default leader, there is
+//    majority who knows the command, this guarantee that any conflict that happen
+//    afterwards would know it. Therefore, this guarantees both consistency and
+//    correctness of conflicting.
+// 2. if the default leader had gone to fast path, then it must have sent
+//    commit message of the same commands and dependencies as of the accept message
+//    this instance sent for recovery. And this is also proven safe.
 func (i *Instance) makeRecoveryDecision() (action uint8, msg message.Message) {
 	i.loadRecoveryInfo()
 	action = broadcastAction
@@ -913,16 +932,14 @@ func (i *Instance) makeRecoveryDecision() (action uint8, msg message.Message) {
 		i.enterAcceptedAsSender()
 		msg = i.makeAccept()
 	case preAccepted:
-		// if former leader committed on fast-path,
-		// then we must send accept instead of pre-accept
-		if ir.identicalCount >= i.replica.quorum() {
+		// If we have F identical replies from non-default-leader preaccepted
+		// replias, we must send ACCEPT message.
+		if ir.identicalCount >= i.replica.F() {
 			i.enterAcceptedAsSender()
 			msg = i.makeAccept()
-
 		} else {
 			i.enterPreAcceptedAsSender()
 			msg = i.makePreAccept()
-			// TODO: action here?
 		}
 	case nilStatus:
 		// get ready to send pre-accept for No-op
