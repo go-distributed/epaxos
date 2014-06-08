@@ -213,7 +213,7 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 		From:       1,
 	}
 
-	data, err = p6.MarshalBinay()
+	data, err = p6.MarshalBinary()
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
 
@@ -237,7 +237,7 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 		From:           1,
 	}
 
-	data, err = p8.MarshalBinay()
+	data, err = p8.MarshalBinary()
 	assert.NoError(t, err)
 	assert.NotNil(t, data)
 

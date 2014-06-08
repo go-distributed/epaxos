@@ -53,7 +53,7 @@ func (p *Prepare) String() string {
 	return fmt.Sprintf("Prepare, Instance[%v][%v], Ballot[%v]", p.ReplicaId, p.InstanceId, p.Ballot.String())
 }
 
-func (p *Prepare) MarshalBinay() ([]byte, error) {
+func (p *Prepare) MarshalBinary() ([]byte, error) {
 	replicaID := uint32(p.ReplicaId)
 	instanceID := uint64(p.InstanceId)
 	from := uint32(p.From)
@@ -112,7 +112,7 @@ func (p *PrepareReply) String() string {
 		p.ReplicaId, p.InstanceId, p.Ballot.String(), p.OriginalBallot.String())
 }
 
-func (p *PrepareReply) MarshalBinay() ([]byte, error) {
+func (p *PrepareReply) MarshalBinary() ([]byte, error) {
 	replicaID := uint32(p.ReplicaId)
 	instanceID := uint64(p.InstanceId)
 	state := protobuf.State(p.Status)
