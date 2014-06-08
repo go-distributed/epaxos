@@ -76,15 +76,15 @@ func (a *Accept) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	a.ReplicaId = uint8(*a.pb.ReplicaID)
-	a.InstanceId = uint64(*a.pb.InstanceID)
-	a.Cmds.FromBytesSlice(a.pb.Cmds)
-	a.Deps = a.pb.Deps
+	a.ReplicaId = uint8(a.pb.GetReplicaID())
+	a.InstanceId = uint64(a.pb.GetInstanceID())
+	a.Cmds.FromBytesSlice(a.pb.GetCmds())
+	a.Deps = a.pb.GetDeps()
 	if a.Ballot == nil {
 		a.Ballot = new(Ballot)
 	}
-	a.Ballot.FromProtobuf(a.pb.Ballot)
-	a.From = uint8(*a.pb.From)
+	a.Ballot.FromProtobuf(a.pb.GetBallot())
+	a.From = uint8(a.pb.GetFrom())
 	return nil
 }
 
@@ -136,12 +136,12 @@ func (a *AcceptReply) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	a.ReplicaId = uint8(*a.pb.ReplicaID)
-	a.InstanceId = uint64(*a.pb.InstanceID)
+	a.ReplicaId = uint8(a.pb.GetReplicaID())
+	a.InstanceId = uint64(a.pb.GetInstanceID())
 	if a.Ballot == nil {
 		a.Ballot = new(Ballot)
 	}
-	a.Ballot.FromProtobuf(a.pb.Ballot)
-	a.From = uint8(*a.pb.From)
+	a.Ballot.FromProtobuf(a.pb.GetBallot())
+	a.From = uint8(a.pb.GetFrom())
 	return nil
 }

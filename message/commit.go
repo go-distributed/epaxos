@@ -65,10 +65,10 @@ func (c *Commit) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	c.ReplicaId = uint8(*c.pb.ReplicaID)
-	c.InstanceId = uint64(*c.pb.InstanceID)
-	c.Cmds.FromBytesSlice(c.pb.Cmds)
-	c.Deps = c.pb.Deps
-	c.From = uint8(*c.pb.From)
+	c.ReplicaId = uint8(c.pb.GetReplicaID())
+	c.InstanceId = uint64(c.pb.GetInstanceID())
+	c.Cmds.FromBytesSlice(c.pb.GetCmds())
+	c.Deps = c.pb.GetDeps()
+	c.From = uint8(c.pb.GetFrom())
 	return nil
 }

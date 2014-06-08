@@ -77,13 +77,13 @@ func (p *Prepare) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	p.ReplicaId = uint8(*p.pb.ReplicaID)
-	p.InstanceId = uint64(*p.pb.InstanceID)
+	p.ReplicaId = uint8(p.pb.GetReplicaID())
+	p.InstanceId = uint64(p.pb.GetInstanceID())
 	if p.Ballot == nil {
 		p.Ballot = new(Ballot)
 	}
-	p.Ballot.FromProtobuf(p.pb.Ballot)
-	p.From = uint8(*p.pb.From)
+	p.Ballot.FromProtobuf(p.pb.GetBallot())
+	p.From = uint8(p.pb.GetFrom())
 	return nil
 }
 
@@ -142,20 +142,20 @@ func (p *PrepareReply) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	p.ReplicaId = uint8(*p.pb.ReplicaID)
-	p.InstanceId = uint64(*p.pb.InstanceID)
-	p.Status = uint8(*p.pb.State)
-	p.Cmds.FromBytesSlice(p.pb.Cmds)
-	p.Deps = p.pb.Deps
+	p.ReplicaId = uint8(p.pb.GetReplicaID())
+	p.InstanceId = uint64(p.pb.GetInstanceID())
+	p.Status = uint8(p.pb.GetState())
+	p.Cmds.FromBytesSlice(p.pb.GetCmds())
+	p.Deps = p.pb.GetDeps()
 	if p.Ballot == nil {
 		p.Ballot = new(Ballot)
 	}
-	p.Ballot.FromProtobuf(p.pb.Ballot)
+	p.Ballot.FromProtobuf(p.pb.GetBallot())
 	if p.OriginalBallot == nil {
 		p.OriginalBallot = new(Ballot)
 	}
-	p.OriginalBallot.FromProtobuf(p.pb.OriginalBallot)
-	p.IsFromLeader = *p.pb.IsFromLeader
-	p.From = uint8(*p.pb.From)
+	p.OriginalBallot.FromProtobuf(p.pb.GetOriginalBallot())
+	p.IsFromLeader = p.pb.GetIsFromLeader()
+	p.From = uint8(p.pb.GetFrom())
 	return nil
 }
