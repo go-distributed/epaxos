@@ -5,21 +5,21 @@ import (
 )
 
 type Transporter interface {
-	// non-blocking send
+	// Send one message, it will block.
 	Send(to uint8, msg message.Message)
 
-	// non-blocking multicast
+	// Send one message to multiple receivers, it will block.
 	MulticastFastquorum(msg message.Message)
 
-	// non-blocking broadcast
+	// Send one message to all receivers, it will block.
 	Broadcast(msg message.Message)
 
-	// register a channel to communicate with replica
+	// Register a channel to communicate with replica.
 	RegisterChannel(ch chan message.Message)
 
-	// start the transporter, it's non-blocking
+	// Start the transporter, it will block until success or failure.
 	Start() error
 
-	// stop the transporter
+	// Stop the transporter.
 	Stop()
 }

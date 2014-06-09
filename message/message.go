@@ -11,6 +11,7 @@ type Message interface {
 	UnmarshalBinary([]byte) error
 }
 
+// TODO(yifan): Remove this.
 func MessageTypeString(m Message) string {
 	switch m.Type() {
 	case ProposeMsg:
