@@ -3,9 +3,7 @@ package epaxos
 import (
 	"math/rand"
 
-	"github.com/go-distributed/epaxos/codec"
 	"github.com/go-distributed/epaxos/message"
-	"github.com/go-distributed/epaxos/transporter"
 )
 
 // A messenger can:
@@ -19,7 +17,7 @@ type Messenger interface {
 	Send(to uint8, msg message.Message) error
 
 	// Multicast a message to the fast quorum.
-	MulticastFastquorum(msg message.Message) error
+	MulticastFastQuorum(msg message.Message) error
 
 	// Broadcast a message to all peers.
 	Broadcast(msg message.Message) error
@@ -32,44 +30,47 @@ type Messenger interface {
 
 	// Stop the messenger.
 	Stop() error
+
+	// Destroy the messenger.
+	Destroy() error
 }
 
 type EpaxosMessenger struct {
-	hostports  map[uint8]string
-	self       uint8
-	fastQuorum int // Consider to remove this.
-	all        int
-	tr         Transporter
-	codec      Codec
+	Hostports  map[uint8]string
+	Self       uint8
+	FastQuorum int // Consider to remove this.
+	All        int
+	Tr         Transporter
+	Codec      Codec
 }
 
 // Send a message to the specified peer.
 func (m *EpaxosMessenger) Send(to uint8, msg message.Message) error {
-	data, err := m.codec.Marshal(msg)
+	data, err := m.Codec.Marshal(msg)
 	if err != nil {
 		return err
 	}
-	return m.tr.Send(m.hostports[to], msg.Type(), data)
+	return m.Tr.Send(m.Hostports[to], msg.Type(), data)
 }
 
 // Multicast a message to the fast quorum.
 func (m *EpaxosMessenger) MulticastFastQuorum(msg message.Message) error {
-	data, err := m.codec.Marshal(msg)
+	data, err := m.Codec.Marshal(msg)
 	if err != nil {
 		return err
 	}
 
-	skip := uint8(rand.Intn(m.all))
-	if skip == m.self {
-		skip = (skip + 1) % uint8(m.all)
+	skip := uint8(rand.Intn(m.All))
+	if skip == m.Self {
+		skip = (skip + 1) % uint8(m.All)
 	}
 
-	for i := uint8(0); i < uint8(m.all); i++ {
-		if i == m.self || i == skip {
-			// Skip itself and one more.
+	for i := uint8(0); i < uint8(m.All); i++ {
+		if i == m.Self || i == skip {
+			// Skip itSelf and one more.
 			continue
 		}
-		err = m.tr.Send(m.hostports[i], msg.Type(), data)
+		err = m.Tr.Send(m.Hostports[i], msg.Type(), data)
 		if err != nil {
 			return err
 		}
@@ -79,16 +80,16 @@ func (m *EpaxosMessenger) MulticastFastQuorum(msg message.Message) error {
 
 // Broadcast a message to all peers.
 func (m *EpaxosMessenger) Broadcast(msg message.Message) error {
-	data, err := m.codec.Marshal(msg)
+	data, err := m.Codec.Marshal(msg)
 	if err != nil {
 		return err
 	}
 
-	for i := uint8(0); i < uint8(m.all); i++ {
-		if i == m.self { // Skip itself.
+	for i := uint8(0); i < uint8(m.All); i++ {
+		if i == m.Self { // Skip itself.
 			continue
 		}
-		err = m.tr.Send(m.hostports[i], msg.Type(), data)
+		err = m.Tr.Send(m.Hostports[i], msg.Type(), data)
 		if err != nil {
 			return err
 		}
@@ -98,50 +99,33 @@ func (m *EpaxosMessenger) Broadcast(msg message.Message) error {
 
 // Tries to receive a message.
 func (m *EpaxosMessenger) Recv() (message.Message, error) {
-	mtype, data, err := m.tr.Recv()
+	mtype, data, err := m.Tr.Recv()
 	if err != nil {
 		return nil, err
 	}
-	return m.codec.Unmarshal(mtype, data)
+	return m.Codec.Unmarshal(mtype, data)
 }
 
 // Start the messenger.
 func (m *EpaxosMessenger) Start() error {
-	if err := m.codec.Initial(); err != nil {
+	if err := m.Codec.Initial(); err != nil {
 		return err
 	}
-	return m.tr.Start()
+	return m.Tr.Start()
 }
 
 // Stop the messenger.
 func (m *EpaxosMessenger) Stop() error {
-	if err := m.tr.Stop(); err != nil {
+	if err := m.Tr.Stop(); err != nil {
 		return err
 	}
-	return m.codec.Destroy()
+	return m.Codec.Stop()
 }
 
-// Create a new messenger that uses GoGoprotobuf over HTTP.
-func NewGoGoProtobufHTTPMessenger(hostports map[uint8]string, self uint8, size int) (*EpaxosMessenger, error) {
-	m := &EpaxosMessenger{
-		hostports:  hostports,
-		self:       self,
-		fastQuorum: size - 1,
-		all:        size,
+// Destroy the messenger.
+func (m *EpaxosMessenger) Destroy() error {
+	if err := m.Tr.Destroy(); err != nil {
+		return err
 	}
-
-	tr, err := transporter.NewHTTPTransporter(hostports[self])
-	if err != nil {
-		return nil, err
-	}
-
-	codec, err := codec.NewGoGoProtobufHTTPTransporter()
-	if err != nil {
-		return nil, err
-		// This can't happen, added here
-		// for symmetric looking.
-	}
-
-	m.tr, m.codec = tr, codec
-	return m, nil
+	return m.Codec.Destroy()
 }

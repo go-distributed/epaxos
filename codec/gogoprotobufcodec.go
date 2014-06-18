@@ -15,7 +15,12 @@ func (gc *GoGoProtobufCodec) Initial() error {
 	return nil
 }
 
-// Destroy te gogoprotobuf (no-op for now).
+// Stop the gogoprotobuf (no-op for now).
+func (gc *GoGoProtobufCodec) Stop() error {
+	return nil
+}
+
+// Destroy the gogoprotobuf (no-op for now).
 func (gc *GoGoProtobufCodec) Destroy() error {
 	return nil
 }
@@ -35,7 +40,7 @@ func (c *GoGoProtobufCodec) Unmarshal(mtype uint8, data []byte) (message.Message
 	case message.PreAcceptMsg:
 		msg = new(message.PreAccept)
 	case message.PreAcceptOkMsg:
-		msg = new(message.PreAccept)
+		msg = new(message.PreAcceptOk)
 	case message.PreAcceptReplyMsg:
 		msg = new(message.PreAcceptReply)
 	case message.AcceptMsg:

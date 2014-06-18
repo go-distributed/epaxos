@@ -20,4 +20,7 @@ type Transporter interface {
 
 	// Stop the transporter.
 	Stop() error
+
+	// Destroy the transporter.
+	Destroy() error
 }

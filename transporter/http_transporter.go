@@ -43,11 +43,15 @@ type HTTPTransporter struct {
 }
 
 // Create a new http transporter.
-func NewHTTPTransporter(self string) (*HTTPTransporter, error) {
+func NewHTTPTransporter(self string, chanSize int) (*HTTPTransporter, error) {
+	if chanSize <= 0 {
+		chanSize = defaultChanSize
+	}
+
 	t := &HTTPTransporter{
 		self:           self,
 		path:           make(map[uint8]string),
-		rawMessageChan: make(chan *rawMessage, defaultChanSize),
+		rawMessageChan: make(chan *rawMessage, chanSize),
 
 		mux:    http.NewServeMux(),
 		client: new(http.Client),
@@ -126,6 +130,11 @@ func (t *HTTPTransporter) Start() error {
 
 // Stop the transporter.
 func (t *HTTPTransporter) Stop() error {
+	return nil
+}
+
+// Destroy the transporter.
+func (t *HTTPTransporter) Destroy() error {
 	close(t.rawMessageChan)
 	return nil
 }
