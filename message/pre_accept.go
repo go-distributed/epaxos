@@ -40,7 +40,7 @@ func (p *PreAccept) Sender() uint8 {
 	return p.From
 }
 
-func (p *PreAccept) Type() uint8 {
+func (p *PreAccept) Type() MsgType {
 	return PreAcceptMsg
 }
 
@@ -103,7 +103,7 @@ func (p *PreAcceptOk) Sender() uint8 {
 	return p.From
 }
 
-func (p *PreAcceptOk) Type() uint8 {
+func (p *PreAcceptOk) Type() MsgType {
 	return PreAcceptOkMsg
 }
 
@@ -157,7 +157,7 @@ func (p *PreAcceptReply) Sender() uint8 {
 	return p.From
 }
 
-func (p *PreAcceptReply) Type() uint8 {
+func (p *PreAcceptReply) Type() MsgType {
 	return PreAcceptReplyMsg
 }
 

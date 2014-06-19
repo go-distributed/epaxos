@@ -33,7 +33,7 @@ func (p *Prepare) Sender() uint8 {
 	return p.From
 }
 
-func (p *Prepare) Type() uint8 {
+func (p *Prepare) Type() MsgType {
 	return PrepareMsg
 }
 
@@ -91,7 +91,7 @@ func (p *PrepareReply) Sender() uint8 {
 	return p.From
 }
 
-func (p *PrepareReply) Type() uint8 {
+func (p *PrepareReply) Type() MsgType {
 	return PrepareReplyMsg
 }
 

@@ -14,7 +14,7 @@ func (t *Timeout) Sender() uint8 {
 	return t.From
 }
 
-func (t *Timeout) Type() uint8 {
+func (t *Timeout) Type() MsgType {
 	return TimeoutMsg
 }
 

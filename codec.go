@@ -15,7 +15,7 @@ type Codec interface {
 	Marshal(msg message.Message) ([]byte, error)
 
 	// Unmarshal a message from bytes.
-	Unmarshal(mtype uint8, data []byte) (message.Message, error)
+	Unmarshal(data []byte) (message.Message, error)
 
 	// Stop a codec.
 	Stop() error
