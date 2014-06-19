@@ -29,7 +29,7 @@ func (a *Accept) Sender() uint8 {
 	return a.From
 }
 
-func (a *Accept) Type() uint8 {
+func (a *Accept) Type() MsgType {
 	return AcceptMsg
 }
 
@@ -92,7 +92,7 @@ func (a *AcceptReply) Sender() uint8 {
 	return a.From
 }
 
-func (a *AcceptReply) Type() uint8 {
+func (a *AcceptReply) Type() MsgType {
 	return AcceptReplyMsg
 }
 

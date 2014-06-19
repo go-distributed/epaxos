@@ -20,7 +20,7 @@ func (c *Commit) Sender() uint8 {
 	return c.From
 }
 
-func (c *Commit) Type() uint8 {
+func (c *Commit) Type() MsgType {
 	return CommitMsg
 }
 

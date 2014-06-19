@@ -50,7 +50,7 @@ func (m *EpaxosMessenger) Send(to uint8, msg message.Message) error {
 	if err != nil {
 		return err
 	}
-	return m.Tr.Send(m.Hostports[to], msg.Type(), data)
+	return m.Tr.Send(m.Hostports[to], data)
 }
 
 // Multicast a message to the fast quorum.
@@ -70,7 +70,7 @@ func (m *EpaxosMessenger) MulticastFastQuorum(msg message.Message) error {
 			// Skip itSelf and one more.
 			continue
 		}
-		err = m.Tr.Send(m.Hostports[i], msg.Type(), data)
+		err = m.Tr.Send(m.Hostports[i], data)
 		if err != nil {
 			return err
 		}
@@ -89,7 +89,7 @@ func (m *EpaxosMessenger) Broadcast(msg message.Message) error {
 		if i == m.Self { // Skip itself.
 			continue
 		}
-		err = m.Tr.Send(m.Hostports[i], msg.Type(), data)
+		err = m.Tr.Send(m.Hostports[i], data)
 		if err != nil {
 			return err
 		}
@@ -99,11 +99,11 @@ func (m *EpaxosMessenger) Broadcast(msg message.Message) error {
 
 // Tries to receive a message.
 func (m *EpaxosMessenger) Recv() (message.Message, error) {
-	mtype, data, err := m.Tr.Recv()
+	data, err := m.Tr.Recv()
 	if err != nil {
 		return nil, err
 	}
-	return m.Codec.Unmarshal(mtype, data)
+	return m.Codec.Unmarshal(data)
 }
 
 // Start the messenger.

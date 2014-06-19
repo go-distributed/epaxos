@@ -1,7 +1,9 @@
 package message
 
+type MsgType uint8
+
 const (
-	ProposeMsg uint8 = iota + 1
+	ProposeMsg MsgType = iota + 1
 	PreAcceptMsg
 	PreAcceptOkMsg
 	PreAcceptReplyMsg

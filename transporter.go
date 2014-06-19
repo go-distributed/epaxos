@@ -4,15 +4,13 @@ package epaxos
 // Send and Recv.
 type Transporter interface {
 	// Send an encoded message to the host:port.
-	// This will block. We need the msgType here because
-	// we assume the message is not self-explained.
-	Send(hostport string, msgType uint8, b []byte) error
+	// This will block. We don't need the msgType here
+	// because we assume the message is self-explained.
+	Send(hostport string, b []byte) error
 
 	// Receive an encoded message from some peer.
-	// Return the type of the message and the content.
-	// We need the msgType here because we assume the
-	// message is not self-explained.
-	Recv() (msgType uint8, b []byte, err error)
+	// Return the bytes form of the message.
+	Recv() (b []byte, err error)
 
 	// Start the transporter, this will block if succeeds,
 	// or return an error if it fails.

@@ -26,7 +26,7 @@ func (p *Propose) Sender() uint8 {
 	return p.From
 }
 
-func (p *Propose) Type() uint8 {
+func (p *Propose) Type() MsgType {
 	return ProposeMsg
 }
 func (p *Propose) Content() interface{} {

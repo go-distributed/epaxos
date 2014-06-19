@@ -2,7 +2,7 @@ package message
 
 type Message interface {
 	Sender() uint8
-	Type() uint8
+	Type() MsgType
 	Content() interface{}
 	Replica() uint8
 	Instance() uint64
@@ -37,8 +37,8 @@ func MessageTypeString(m Message) string {
 	}
 }
 
-func TypeToString(msgType uint8) string {
-	switch msgType {
+func TypeToString(mtype MsgType) string {
+	switch mtype {
 	case ProposeMsg:
 		return "Propose"
 	case PreAcceptMsg:
