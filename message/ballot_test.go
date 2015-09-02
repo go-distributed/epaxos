@@ -117,7 +117,7 @@ func TestBallotClone(t *testing.T) {
 
 func TestBallotEpoch(t *testing.T) {
 	b := NewBallot(2, 33, 4)
-	assert.Equal(t, b.GetEpoch(), uint8(2))
+	assert.Equal(t, b.GetEpoch(), uint32(2))
 }
 
 func TestBallotIsInitialBallot(t *testing.T) {
