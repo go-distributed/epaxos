@@ -25,7 +25,7 @@ import proto "code.google.com/p/gogoprotobuf/proto"
 import json "encoding/json"
 import math "math"
 
-// discarding unused import gogoproto "code.google.com/p/gogoprotobuf/gogoproto/gogo.pb"
+// discarding unused import gogoproto "github.com/gogo/protobuf/gogoproto/gogo.pb"
 
 import io "io"
 import code_google_com_p_gogoprotobuf_proto "code.google.com/p/gogoprotobuf/proto"
@@ -2407,7 +2407,11 @@ func randFieldMessage(data []byte, r randyMessage, fieldNumber int, wire int) []
 	switch wire {
 	case 0:
 		data = encodeVarintPopulateMessage(data, uint64(key))
-		data = encodeVarintPopulateMessage(data, uint64(r.Int63()))
+		v44 := r.Int63()
+		if r.Intn(2) == 0 {
+			v44 *= -1
+		}
+		data = encodeVarintPopulateMessage(data, uint64(v44))
 	case 1:
 		data = encodeVarintPopulateMessage(data, uint64(key))
 		data = append(data, byte(r.Intn(256)), byte(r.Intn(256)), byte(r.Intn(256)), byte(r.Intn(256)), byte(r.Intn(256)), byte(r.Intn(256)), byte(r.Intn(256)), byte(r.Intn(256)))
@@ -2504,13 +2508,7 @@ func (m *PreAccept) MarshalTo(data []byte) (n int, err error) {
 		for _, num := range m.Deps {
 			data[i] = 0x20
 			i++
-			for num >= 1<<7 {
-				data[i] = uint8(uint64(num)&0x7f | 0x80)
-				num >>= 7
-				i++
-			}
-			data[i] = uint8(num)
-			i++
+			i = encodeVarintMessage(data, i, uint64(num))
 		}
 	}
 	if m.Ballot != nil {
@@ -2597,13 +2595,7 @@ func (m *PreAcceptReply) MarshalTo(data []byte) (n int, err error) {
 		for _, num := range m.Deps {
 			data[i] = 0x18
 			i++
-			for num >= 1<<7 {
-				data[i] = uint8(uint64(num)&0x7f | 0x80)
-				num >>= 7
-				i++
-			}
-			data[i] = uint8(num)
-			i++
+			i = encodeVarintMessage(data, i, uint64(num))
 		}
 	}
 	if m.Ballot != nil {
@@ -2663,13 +2655,7 @@ func (m *Accept) MarshalTo(data []byte) (n int, err error) {
 		for _, num := range m.Deps {
 			data[i] = 0x20
 			i++
-			for num >= 1<<7 {
-				data[i] = uint8(uint64(num)&0x7f | 0x80)
-				num >>= 7
-				i++
-			}
-			data[i] = uint8(num)
-			i++
+			i = encodeVarintMessage(data, i, uint64(num))
 		}
 	}
 	if m.Ballot != nil {
@@ -2824,13 +2810,7 @@ func (m *PrepareReply) MarshalTo(data []byte) (n int, err error) {
 		for _, num := range m.Deps {
 			data[i] = 0x28
 			i++
-			for num >= 1<<7 {
-				data[i] = uint8(uint64(num)&0x7f | 0x80)
-				num >>= 7
-				i++
-			}
-			data[i] = uint8(num)
-			i++
+			i = encodeVarintMessage(data, i, uint64(num))
 		}
 	}
 	if m.Ballot != nil {
@@ -2910,13 +2890,7 @@ func (m *Commit) MarshalTo(data []byte) (n int, err error) {
 		for _, num := range m.Deps {
 			data[i] = 0x20
 			i++
-			for num >= 1<<7 {
-				data[i] = uint8(uint64(num)&0x7f | 0x80)
-				num >>= 7
-				i++
-			}
-			data[i] = uint8(num)
-			i++
+			i = encodeVarintMessage(data, i, uint64(num))
 		}
 	}
 	if m.From != nil {
