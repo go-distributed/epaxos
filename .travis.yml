@@ -1,11 +1,15 @@
 language: go
 go: 
- - 1.2
+ - 1.4
 
-script:
- - go get
+install:
  - go get github.com/stretchr/testify/assert
  - go get github.com/golang/glog
  - go get code.google.com/p/go.tools/cmd/cover
- - cd replica
- - go test -v -cover
+ - go get github.com/boltdb/bolt/...
+
+script:
+ - go test -v -cover ./...
+
+sudo: false
+
