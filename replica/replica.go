@@ -115,7 +115,7 @@ type Replica struct {
 
 	// persistent store
 	enablePersistent bool
-	store            *persistent.LevelDB
+	store            persistent.DB
 }
 
 type Param struct {
@@ -212,16 +212,13 @@ func New(param *Param) (*Replica, error) {
 		enablePersistent: param.EnablePersistent,
 	}
 
-	var path string
 	if param.PersistentPath == "" {
-		path = fmt.Sprintf("%s-%d", "/dev/shm/test", r.Id)
-	} else {
-		path = param.PersistentPath
+		panic("Persistent path not set")
 	}
 
-	r.store, err = persistent.NewLevelDB(path, param.Restore)
+	r.store, err = persistent.NewBoltDB(param.PersistentPath, param.Restore)
 	if err != nil {
-		glog.Errorln("replica.New: failed to make new storage")
+		glog.Errorln("replica.New: failed to make new storage: ", err)
 		return nil, err
 	}
 
@@ -261,7 +258,9 @@ func (r *Replica) Start() error {
 func (r *Replica) stopTickers() {
 	r.executeTicker.Stop()
 	r.timeoutTicker.Stop()
-	r.proposeTicker.Stop()
+	if r.enableBatching {
+		r.proposeTicker.Stop()
+	}
 }
 
 func (r *Replica) Stop() {

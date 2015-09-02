@@ -42,6 +42,7 @@ func commonTestlibExampleReplica() *Replica {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 		Transporter:  transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, _ := New(param)
 	return r
@@ -53,6 +54,7 @@ func commonTestlibExampleInstance() *Instance {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 		Transporter:  transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, err := New(param)
 	if err != nil {
@@ -156,6 +158,7 @@ func TestNewInstance(t *testing.T) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 		Transporter:  transporter.NewDummyTR(expectedReplicaId, 5),
+		PersistentPath: tempfile(),
 	}
 	r, _ := New(param)
 	i := NewInstance(r, expectedReplicaId, expectedInstanceId)

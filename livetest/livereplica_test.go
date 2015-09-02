@@ -12,6 +12,8 @@ import (
 	"github.com/go-distributed/epaxos/test"
 	"github.com/go-distributed/epaxos/transporter"
 	"github.com/stretchr/testify/assert"
+	"io/ioutil"
+	"os"
 )
 
 var _ = fmt.Printf
@@ -45,6 +47,7 @@ func livetestlibSetupCluster(clusterSize int) []*replica.Replica {
 			Size:            uint8(clusterSize),
 			StateMachine:    new(test.DummySM),
 			Transporter:     transporter.NewDummyTR(uint8(i), clusterSize),
+			PersistentPath:  tempfile(),
 		}
 		nodes[i], _ = replica.New(param)
 	}
@@ -359,4 +362,13 @@ func Test3ProposerConflictTimeout(t *testing.T) {
 		pos := uint64(i)
 		assert.True(t, liveTestlibVerifyDependency(nodes[0], pos))
 	}
+}
+
+
+// Borrowed from: https://github.com/boltdb/bolt/blob/2f4ba1c5331c044ed8c2743b791d5bedf0efa54b/db_test.go#L30-L38
+func tempfile() string {
+	f, _ := ioutil.TempFile("", "bolt-")
+	f.Close()
+	os.Remove(f.Name())
+	return f.Name()
 }
