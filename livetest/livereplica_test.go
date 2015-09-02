@@ -76,6 +76,7 @@ func livetestlibSetupEasyTimeoutCluster(clusterSize int) []*replica.Replica {
 			Size:            uint8(clusterSize),
 			StateMachine:    new(test.DummySM),
 			Transporter:     transporter.NewDummyTR(uint8(i), clusterSize),
+			PersistentPath:  tempfile(),
 		}
 		nodes[i], _ = replica.New(param)
 	}
