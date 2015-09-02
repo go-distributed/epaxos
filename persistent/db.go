@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/boltdb/bolt"
-	"github.com/go-distributed/epaxos"
+	"github.com/sargun/epaxos"
 )
 
 var BUCKET_NAME []byte = []byte{'e', 'p', 'a', 'x' , 'o', 's'}

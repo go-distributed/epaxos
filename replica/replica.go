@@ -20,9 +20,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/go-distributed/epaxos"
-	"github.com/go-distributed/epaxos/message"
-	"github.com/go-distributed/epaxos/persistent"
+	"github.com/sargun/epaxos"
+	"github.com/sargun/epaxos/message"
+	"github.com/sargun/epaxos/persistent"
 	"github.com/golang/glog"
 )
 

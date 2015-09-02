@@ -1,7 +1,7 @@
 package transporter
 
 import (
-	"github.com/go-distributed/epaxos/message"
+	"github.com/sargun/epaxos/message"
 )
 
 type DummyTransporter struct {

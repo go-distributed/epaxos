@@ -1,7 +1,7 @@
 package epaxos
 
 import (
-	"github.com/go-distributed/epaxos/message"
+	"github.com/sargun/epaxos/message"
 )
 
 type Transporter interface {

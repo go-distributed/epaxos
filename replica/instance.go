@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-distributed/epaxos/message"
+	"github.com/sargun/epaxos/message"
 )
 
 // ****************************

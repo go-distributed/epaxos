@@ -3,7 +3,7 @@ package persistent
 import (
 	"testing"
 
-	"github.com/go-distributed/epaxos"
+	"github.com/sargun/epaxos"
 	"github.com/stretchr/testify/assert"
 )
 
