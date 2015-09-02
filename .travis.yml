@@ -7,6 +7,10 @@ install:
  - go get github.com/golang/glog
  - go get golang.org/x/tools/cmd/cover
  - go get github.com/boltdb/bolt/...
+ - go get github.com/gogo/protobuf/proto
+ - go get github.com/gogo/protobuf/protoc-gen-gogo
+ - go get github.com/gogo/protobuf/gogoproto
+ - go get github.com/gogo/protobuf/protoc-gen-gofast
 
 script:
  - go test -v -cover ./...
