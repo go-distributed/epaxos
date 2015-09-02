@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"net"
 
-	"github.com/go-distributed/epaxos/message"
+	"github.com/sargun/epaxos/message"
 	"github.com/golang/glog"
 )
 

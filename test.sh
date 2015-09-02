@@ -4,7 +4,7 @@
 rm /dev/shm/demo* -fr
 rm /tmp/*test* -fr
 
-ROOT=$GOPATH/src/github.com/go-distributed/epaxos
+ROOT=$GOPATH/src/github.com/sargun/epaxos
 cd $ROOT
 
 echo "======= Basic Message/Data Test ======"

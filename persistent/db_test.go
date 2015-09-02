@@ -3,13 +3,12 @@ package persistent
 import (
 	"testing"
 
-	"code.google.com/p/leveldb-go/leveldb/db"
-	"github.com/go-distributed/epaxos"
+	"github.com/sargun/epaxos"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewCloseAndDrop(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test", false)
+	l, err := NewBoltDB("/tmp/test", false)
 	defer func() {
 		assert.NoError(t, l.Close())
 		assert.NoError(t, l.Drop())
@@ -17,12 +16,12 @@ func TestNewCloseAndDrop(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, l)
-	assert.NotNil(t, l.ldb)
-	assert.Equal(t, l.wsync, &db.WriteOptions{Sync: true})
+	assert.NotNil(t, l.db)
+	assert.Equal(t, l.db.NoSync, false)
 }
 
 func TestPutAndGet(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test", false)
+	l, err := NewBoltDB("/tmp/test", false)
 	assert.NoError(t, err)
 
 	defer func() {
@@ -41,7 +40,7 @@ func TestPutAndGet(t *testing.T) {
 }
 
 func TestBatchPut(t *testing.T) {
-	l, err := NewLevelDB("/tmp/test", false)
+	l, err := NewBoltDB("/tmp/test", false)
 	assert.NoError(t, err)
 
 	defer func() {

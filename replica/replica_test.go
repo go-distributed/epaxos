@@ -5,11 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-distributed/epaxos"
-	"github.com/go-distributed/epaxos/message"
-	"github.com/go-distributed/epaxos/test"
-	"github.com/go-distributed/epaxos/transporter"
+	"github.com/sargun/epaxos"
+	"github.com/sargun/epaxos/message"
+	"github.com/sargun/epaxos/test"
+	"github.com/sargun/epaxos/transporter"
 	"github.com/stretchr/testify/assert"
+	"io/ioutil"
+	"os"
 )
 
 var _ = fmt.Printf
@@ -20,6 +22,7 @@ func TestNewReplica(t *testing.T) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 		Transporter:  transporter.NewDummyTR(3, 5),
+		PersistentPath: tempfile(),
 	}
 	r, _ := New(param)
 
@@ -45,6 +48,7 @@ func TestMakeInitialBallot(t *testing.T) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 		Transporter:  transporter.NewDummyTR(3, 5),
+		PersistentPath: tempfile(),
 	}
 	r, _ := New(param)
 	r.Epoch = 3
@@ -59,6 +63,7 @@ func depsTestSetupReplica() (r *Replica, i *Instance) {
 		Size:         5,
 		StateMachine: new(test.DummySM),
 		Transporter:  transporter.NewDummyTR(4, 5),
+		PersistentPath: tempfile(),
 	}
 	r, _ = New(param)
 	for i := 0; i < 5; i++ {
@@ -650,6 +655,7 @@ func TestProposeIdNoBatch(t *testing.T) {
 		StateMachine:   new(test.DummySM),
 		EnableBatching: false,
 		Transporter:    transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, _ := New(param)
 
@@ -688,6 +694,7 @@ func TestProposeIdWithBatch(t *testing.T) {
 		EnableBatching: true,
 		BatchInterval:  time.Millisecond * 50,
 		Transporter:    transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, _ := New(param)
 
@@ -727,6 +734,7 @@ func TestStoreSingleInstance(t *testing.T) {
 		EnableBatching: true,
 		BatchInterval:  time.Millisecond * 50,
 		Transporter:    transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, err := New(param)
 	assert.NoError(t, err)
@@ -747,6 +755,7 @@ func TestStoreRestoreSingleInstance(t *testing.T) {
 		EnableBatching: true,
 		BatchInterval:  time.Millisecond * 50,
 		Transporter:    transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, err := New(param)
 	assert.NoError(t, err)
@@ -775,6 +784,7 @@ func TestStoreRestoreSinglePreparingInstance(t *testing.T) {
 		EnableBatching: true,
 		BatchInterval:  time.Millisecond * 50,
 		Transporter:    transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, err := New(param)
 	assert.NoError(t, err)
@@ -808,6 +818,7 @@ func TestStoreRestoreMultipleInstances(t *testing.T) {
 		EnableBatching: true,
 		BatchInterval:  time.Millisecond * 50,
 		Transporter:    transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, err := New(param)
 	assert.NoError(t, err)
@@ -856,6 +867,7 @@ func TestStoreAndRestoreReplica(t *testing.T) {
 		EnableBatching: true,
 		BatchInterval:  time.Millisecond * 50,
 		Transporter:    transporter.NewDummyTR(0, 5),
+		PersistentPath: tempfile(),
 	}
 	r, err := New(param)
 	assert.NoError(t, err)
@@ -873,6 +885,10 @@ func TestStoreAndRestoreReplica(t *testing.T) {
 	// store to disk
 	assert.NoError(t, r.StoreReplica())
 
+	// Shutdown replica -- BoltDB enforces one process per database
+	// In fact I have no idea idea how this worked with LevelDB
+	r.Stop()
+
 	// restore from disk
 	param.Restore = true
 	rr, err := New(param)
@@ -886,4 +902,12 @@ func TestStoreAndRestoreReplica(t *testing.T) {
 
 	r.store.Drop()
 	rr.store.Drop()
+}
+
+// Borrowed from: https://github.com/boltdb/bolt/blob/2f4ba1c5331c044ed8c2743b791d5bedf0efa54b/db_test.go#L30-L38
+func tempfile() string {
+	f, _ := ioutil.TempFile("", "bolt-")
+	f.Close()
+	os.Remove(f.Name())
+	return f.Name()
 }
