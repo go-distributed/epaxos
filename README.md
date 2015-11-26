@@ -39,7 +39,7 @@ This repository has following dependencies:
 
 * github.com/stretchr/testify
 * github.com/golang/glog
-* code.google.com/p/leveldb-go/leveldb
+* github.com/golang/leveldb
 
 Please "go get" them before running any code. Or you can run:
 

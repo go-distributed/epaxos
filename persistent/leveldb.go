@@ -4,8 +4,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"code.google.com/p/leveldb-go/leveldb"
-	"code.google.com/p/leveldb-go/leveldb/db"
+	"github.com/golang/leveldb"
+	"github.com/golang/leveldb/db"
 	"github.com/go-distributed/epaxos"
 )
 
