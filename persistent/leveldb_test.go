@@ -3,7 +3,7 @@ package persistent
 import (
 	"testing"
 
-	"code.google.com/p/leveldb-go/leveldb/db"
+	"github.com/golang/leveldb/db"
 	"github.com/go-distributed/epaxos"
 	"github.com/stretchr/testify/assert"
 )
