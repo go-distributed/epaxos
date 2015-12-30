@@ -2,6 +2,8 @@ package message
 
 import (
 	"fmt"
+
+	"github.com/go-distributed/epaxos/protobuf"
 )
 
 const (
@@ -25,9 +27,9 @@ type Ballot struct {
 
 func NewBallot(epoch uint32, number uint64, replicId uint8) *Ballot {
 	return &Ballot{
-		epoch,
-		number,
-		replicId,
+		Epoch:     epoch,
+		Number:    number,
+		ReplicaId: replicId,
 	}
 }
 
@@ -96,9 +98,9 @@ func (b *Ballot) SetReplicaId(rId uint8) {
 
 func (b *Ballot) IncNumClone() *Ballot {
 	return &Ballot{
-		b.Epoch,
-		b.Number + 1,
-		b.ReplicaId,
+		Epoch:     b.Epoch,
+		Number:    b.Number + 1,
+		ReplicaId: b.ReplicaId,
 	}
 }
 
@@ -111,12 +113,27 @@ func (b *Ballot) Clone() *Ballot {
 		panic("")
 	}
 	return &Ballot{
-		b.Epoch,
-		b.Number,
-		b.ReplicaId,
+		Epoch:     b.Epoch,
+		Number:    b.Number,
+		ReplicaId: b.ReplicaId,
 	}
 }
 
 func (b *Ballot) String() string {
 	return fmt.Sprintf("%v.%v.%v", b.Epoch, b.Number, b.ReplicaId)
+}
+
+func (b *Ballot) ToProtobuf() *protobuf.Ballot {
+	epoch, number, replicaID := b.Epoch, b.Number, uint32(b.ReplicaId)
+	return &protobuf.Ballot{
+		Epoch:     &epoch,
+		Number:    &number,
+		ReplicaID: &replicaID,
+	}
+}
+
+func (b *Ballot) FromProtobuf(pballot *protobuf.Ballot) {
+	b.Epoch = uint32(*pballot.Epoch)
+	b.Number = uint64(*pballot.Number)
+	b.ReplicaId = uint8(*pballot.ReplicaID)
 }
