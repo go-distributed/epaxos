@@ -90,7 +90,7 @@ message PrepareReply {
 
 message Commit {
         required uint32 ReplicaID = 1;
-        required uint64 InstancdID = 2;
+        required uint64 InstanceID = 2;
         repeated bytes Cmds = 3;
         repeated uint64 Deps = 4;
         required uint32 From = 5;
