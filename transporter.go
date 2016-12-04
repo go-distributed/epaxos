@@ -1,25 +1,23 @@
 package epaxos
 
-import (
-	"github.com/go-distributed/epaxos/message"
-)
-
+// A transporter provides only simple primitives, including
+// Send and Recv.
 type Transporter interface {
-	// non-blocking send
-	Send(to uint8, msg message.Message)
+	// Send an encoded message to the host:port.
+	// This will block. We need the msgType here because
+	// we assume the message is not self-explained.
+	Send(hostport string, msgType uint8, b []byte) error
 
-	// non-blocking multicast
-	MulticastFastquorum(msg message.Message)
+	// Receive an encoded message from some peer.
+	// Return the type of the message and the content.
+	// We need the msgType here because we assume the
+	// message is not self-explained.
+	Recv() (msgType uint8, b []byte, err error)
 
-	// non-blocking broadcast
-	Broadcast(msg message.Message)
-
-	// register a channel to communicate with replica
-	RegisterChannel(ch chan message.Message)
-
-	// start the transporter, it's non-blocking
+	// Start the transporter, this will block if succeeds,
+	// or return an error if it fails.
 	Start() error
 
-	// stop the transporter
-	Stop()
+	// Stop the transporter.
+	Stop() error
 }

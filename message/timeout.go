@@ -33,3 +33,11 @@ func (t *Timeout) Instance() uint64 {
 func (t *Timeout) String() string {
 	return fmt.Sprintf("Timeout, Instance[%v][%v]", t.ReplicaId, t.InstanceId)
 }
+
+func (t *Timeout) MarshalProtobuf() ([]byte, error) {
+	return nil, fmt.Errorf("Timeout: MarshalProtobuf() not implemented\n")
+}
+
+func (t *Timeout) UnmarshalProtobuf([]byte) error {
+	return fmt.Errorf("Timeout: UnmarshalProtobuf() not implemented\n")
+}

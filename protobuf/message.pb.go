@@ -471,7 +471,7 @@ func (m *PrepareReply) GetFrom() uint32 {
 
 type Commit struct {
 	ReplicaID        *uint32  `protobuf:"varint,1,req" json:"ReplicaID,omitempty"`
-	InstancdID       *uint64  `protobuf:"varint,2,req" json:"InstancdID,omitempty"`
+	InstanceID       *uint64  `protobuf:"varint,2,req" json:"InstanceID,omitempty"`
 	Cmds             [][]byte `protobuf:"bytes,3,rep" json:"Cmds,omitempty"`
 	Deps             []uint64 `protobuf:"varint,4,rep" json:"Deps,omitempty"`
 	From             *uint32  `protobuf:"varint,5,req" json:"From,omitempty"`
@@ -488,9 +488,9 @@ func (m *Commit) GetReplicaID() uint32 {
 	return 0
 }
 
-func (m *Commit) GetInstancdID() uint64 {
-	if m != nil && m.InstancdID != nil {
-		return *m.InstancdID
+func (m *Commit) GetInstanceID() uint64 {
+	if m != nil && m.InstanceID != nil {
+		return *m.InstanceID
 	}
 	return 0
 }
@@ -1676,7 +1676,7 @@ func (m *Commit) Unmarshal(data []byte) error {
 					break
 				}
 			}
-			m.InstancdID = &v
+			m.InstanceID = &v
 		case 3:
 			if wireType != 2 {
 				return code_google_com_p_gogoprotobuf_proto.ErrWrongType
@@ -1883,7 +1883,7 @@ func (this *Commit) String() string {
 	}
 	s := strings.Join([]string{`&Commit{`,
 		`ReplicaID:` + valueToStringMessage(this.ReplicaID) + `,`,
-		`InstancdID:` + valueToStringMessage(this.InstancdID) + `,`,
+		`InstanceID:` + valueToStringMessage(this.InstanceID) + `,`,
 		`Cmds:` + fmt.Sprintf("%v", this.Cmds) + `,`,
 		`Deps:` + fmt.Sprintf("%v", this.Deps) + `,`,
 		`From:` + valueToStringMessage(this.From) + `,`,
@@ -2114,8 +2114,8 @@ func (m *Commit) Size() (n int) {
 	if m.ReplicaID != nil {
 		n += 1 + sovMessage(uint64(*m.ReplicaID))
 	}
-	if m.InstancdID != nil {
-		n += 1 + sovMessage(uint64(*m.InstancdID))
+	if m.InstanceID != nil {
+		n += 1 + sovMessage(uint64(*m.InstanceID))
 	}
 	if len(m.Cmds) > 0 {
 		for _, b := range m.Cmds {
@@ -2339,7 +2339,7 @@ func NewPopulatedCommit(r randyMessage, easy bool) *Commit {
 	v37 := r.Uint32()
 	this.ReplicaID = &v37
 	v38 := uint64(r.Uint32())
-	this.InstancdID = &v38
+	this.InstanceID = &v38
 	if r.Intn(10) != 0 {
 		v39 := r.Intn(100)
 		this.Cmds = make([][]byte, v39)
@@ -2893,10 +2893,10 @@ func (m *Commit) MarshalTo(data []byte) (n int, err error) {
 		i++
 		i = encodeVarintMessage(data, i, uint64(*m.ReplicaID))
 	}
-	if m.InstancdID != nil {
+	if m.InstanceID != nil {
 		data[i] = 0x10
 		i++
-		i = encodeVarintMessage(data, i, uint64(*m.InstancdID))
+		i = encodeVarintMessage(data, i, uint64(*m.InstanceID))
 	}
 	if len(m.Cmds) > 0 {
 		for _, b := range m.Cmds {
@@ -3016,7 +3016,7 @@ func (this *Commit) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := strings1.Join([]string{`&protobuf.Commit{` + `ReplicaID:` + valueToGoStringMessage(this.ReplicaID, "uint32"), `InstancdID:` + valueToGoStringMessage(this.InstancdID, "uint64"), `Cmds:` + fmt1.Sprintf("%#v", this.Cmds), `Deps:` + fmt1.Sprintf("%#v", this.Deps), `From:` + valueToGoStringMessage(this.From, "uint32"), `XXX_unrecognized:` + fmt1.Sprintf("%#v", this.XXX_unrecognized) + `}`}, ", ")
+	s := strings1.Join([]string{`&protobuf.Commit{` + `ReplicaID:` + valueToGoStringMessage(this.ReplicaID, "uint32"), `InstanceID:` + valueToGoStringMessage(this.InstanceID, "uint64"), `Cmds:` + fmt1.Sprintf("%#v", this.Cmds), `Deps:` + fmt1.Sprintf("%#v", this.Deps), `From:` + valueToGoStringMessage(this.From, "uint32"), `XXX_unrecognized:` + fmt1.Sprintf("%#v", this.XXX_unrecognized) + `}`}, ", ")
 	return s
 }
 func valueToGoStringMessage(v interface{}, typ string) string {
@@ -4095,14 +4095,14 @@ func (this *Commit) VerboseEqual(that interface{}) error {
 	} else if that1.ReplicaID != nil {
 		return fmt2.Errorf("ReplicaID this(%v) Not Equal that(%v)", this.ReplicaID, that1.ReplicaID)
 	}
-	if this.InstancdID != nil && that1.InstancdID != nil {
-		if *this.InstancdID != *that1.InstancdID {
-			return fmt2.Errorf("InstancdID this(%v) Not Equal that(%v)", *this.InstancdID, *that1.InstancdID)
+	if this.InstanceID != nil && that1.InstanceID != nil {
+		if *this.InstanceID != *that1.InstanceID {
+			return fmt2.Errorf("InstanceID this(%v) Not Equal that(%v)", *this.InstanceID, *that1.InstanceID)
 		}
-	} else if this.InstancdID != nil {
-		return fmt2.Errorf("this.InstancdID == nil && that.InstancdID != nil")
-	} else if that1.InstancdID != nil {
-		return fmt2.Errorf("InstancdID this(%v) Not Equal that(%v)", this.InstancdID, that1.InstancdID)
+	} else if this.InstanceID != nil {
+		return fmt2.Errorf("this.InstanceID == nil && that.InstanceID != nil")
+	} else if that1.InstanceID != nil {
+		return fmt2.Errorf("InstanceID this(%v) Not Equal that(%v)", this.InstanceID, that1.InstanceID)
 	}
 	if len(this.Cmds) != len(that1.Cmds) {
 		return fmt2.Errorf("Cmds this(%v) Not Equal that(%v)", len(this.Cmds), len(that1.Cmds))
@@ -4163,13 +4163,13 @@ func (this *Commit) Equal(that interface{}) bool {
 	} else if that1.ReplicaID != nil {
 		return false
 	}
-	if this.InstancdID != nil && that1.InstancdID != nil {
-		if *this.InstancdID != *that1.InstancdID {
+	if this.InstanceID != nil && that1.InstanceID != nil {
+		if *this.InstanceID != *that1.InstanceID {
 			return false
 		}
-	} else if this.InstancdID != nil {
+	} else if this.InstanceID != nil {
 		return false
-	} else if that1.InstancdID != nil {
+	} else if that1.InstanceID != nil {
 		return false
 	}
 	if len(this.Cmds) != len(that1.Cmds) {
