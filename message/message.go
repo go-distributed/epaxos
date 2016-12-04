@@ -7,8 +7,11 @@ type Message interface {
 	Replica() uint8
 	Instance() uint64
 	String() string
+	MarshalBinary() ([]byte, error)
+	UnmarshalBinary([]byte) error
 }
 
+// TODO(yifan): Remove this.
 func MessageTypeString(m Message) string {
 	switch m.Type() {
 	case ProposeMsg:

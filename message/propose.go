@@ -44,3 +44,11 @@ func (p *Propose) Instance() uint64 {
 func (p *Propose) String() string {
 	return fmt.Sprintf("Propose, Instance[%v][%v]", p.ReplicaId, p.InstanceId)
 }
+
+func (p *Propose) MarshalBinary() ([]byte, error) {
+	return nil, fmt.Errorf("Propose: MarshalBinary() not implemented\n")
+}
+
+func (p *Propose) UnmarshalBinary([]byte) error {
+	return fmt.Errorf("Propose: UnmarshalBinary() not implemented\n")
+}
